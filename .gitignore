@@ -1,0 +1,18 @@
+# Rust / Cargo
+/target/
+**/target/
+# If using Visual Studio / VSCode
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Ignore build artefacts
+*.exe
+*.dll
+*.pdb
+*.lib
+
+# Mac / misc
+.DS_Store
