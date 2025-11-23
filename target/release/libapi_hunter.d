@@ -1,0 +1,1 @@
+D:\Programmieren\Projekte\API_Hunter\target\release\libapi_hunter.rlib: D:\Programmieren\Projekte\API_Hunter\src\enrich\json_shape.rs D:\Programmieren\Projekte\API_Hunter\src\enrich\mod.rs D:\Programmieren\Projekte\API_Hunter\src\filter\api_patterns.rs D:\Programmieren\Projekte\API_Hunter\src\filter\mod.rs D:\Programmieren\Projekte\API_Hunter\src\lib.rs
