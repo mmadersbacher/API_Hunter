@@ -11,28 +11,27 @@ fn extract_host(url: &str) -> Option<String> {
 }
 
 /// Probe URL with optional throttle. If `throttle` is Some, an acquire is awaited before performing requests.
-pub async fn probe_url(client: &Client, url: &str, timeout_secs: u64, throttle: Option<&Throttle>) -> anyhow::Result<RawEvent> {
+pub async fn probe_url(client: &Client, url: &str, timeout_secs: u64, throttle: Option<&Throttle>, retries: usize, backoff_initial_ms: u64, backoff_max_ms: u64, aggressive: bool) -> anyhow::Result<RawEvent> {
     // apply throttle if present
     if let Some(t) = throttle {
         if let Some(host) = extract_host(url) {
             let _p = t.acquire(&host).await; // permit held until dropped
             // After acquiring permit, perform probe with retries/backoff
-            return probe_with_retries(client, url, timeout_secs, Some(t), &host).await;
+            return probe_with_retries(client, url, timeout_secs, Some(t), &host, retries, backoff_initial_ms, backoff_max_ms, aggressive).await;
         }
     }
-    probe_with_retries(client, url, timeout_secs, None, "").await
+    probe_with_retries(client, url, timeout_secs, None, "", retries, backoff_initial_ms, backoff_max_ms, aggressive).await
 }
 
-async fn probe_with_retries(client: &Client, url: &str, timeout_secs: u64, throttle: Option<&Throttle>, host: &str) -> anyhow::Result<RawEvent> {
-    let mut tries = 0usize;
-    let mut backoff = 200u64; // ms
-    loop {
-        tries += 1;
+async fn probe_with_retries(client: &Client, url: &str, timeout_secs: u64, throttle: Option<&Throttle>, host: &str, retries: usize, backoff_initial_ms: u64, backoff_max_ms: u64, aggressive: bool) -> anyhow::Result<RawEvent> {
+    let max_retries = std::cmp::min(std::cmp::max(1usize, retries), 10usize);
+    let mut backoff = backoff_initial_ms.max(1);
+    for attempt in 1..=max_retries {
         let res = probe_url_inner(client, url, timeout_secs).await;
         match res {
             Ok(ev) => {
                 // If WAF-like responses (detected by notes containing waf or status 429/5xx repeated), cool down host
-                if ev.status == 429 || (ev.status >= 500 && ev.status < 600) {
+                if (ev.status == 429 || (ev.status >= 500 && ev.status < 600)) && !aggressive {
                     if let Some(t) = throttle {
                         if !host.is_empty() {
                             t.cool_down_host(host, 1, 30); // reduce to 1 for 30s
@@ -42,16 +41,18 @@ async fn probe_with_retries(client: &Client, url: &str, timeout_secs: u64, throt
                 return Ok(ev);
             }
             Err(e) => {
-                if tries >= 3 {
+                if attempt >= max_retries {
                     return Err(e);
                 }
-                // exponential backoff
-                tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
-                backoff *= 2;
+                // exponential backoff with cap
+                let wait_ms = std::cmp::min(backoff, backoff_max_ms);
+                tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+                backoff = backoff.saturating_mul(2);
                 continue;
             }
         }
     }
+    Err(anyhow::anyhow!("probe failed after {} attempts", max_retries))
 }
 
 async fn probe_url_inner(client: &Client, url: &str, timeout_secs: u64) -> anyhow::Result<RawEvent> {
