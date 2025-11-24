@@ -73,6 +73,34 @@ pub enum Commands {
         /// Confirm you have explicit permission to run aggressive scans (required when --aggressive used)
         #[arg(long, default_value_t = false)]
         confirm_aggressive: bool,
+
+        /// Enable parameter fuzzing to discover hidden parameters
+        #[arg(long, default_value_t = false)]
+        fuzz_params: bool,
+
+        /// Test for IDOR vulnerabilities on ID parameters
+        #[arg(long, default_value_t = false)]
+        test_idor: bool,
+
+        /// Deep analysis mode: analyze headers, CORS, security, fingerprint technologies
+        #[arg(long, default_value_t = false)]
+        deep_analysis: bool,
+
+        /// Scan for admin/debug endpoints
+        #[arg(long, default_value_t = false)]
+        scan_admin: bool,
+
+        /// Advanced IDOR testing with multiple techniques
+        #[arg(long, default_value_t = false)]
+        advanced_idor: bool,
+
+        /// Anonymous mode: Route traffic through residential proxies with human-like patterns
+        #[arg(long, default_value_t = false)]
+        anonymous: bool,
+
+        /// Full-speed mode: Skip all delays and rate limiting (still anonymous)
+        #[arg(long, default_value_t = false)]
+        full_speed: bool,
     },
 }
 

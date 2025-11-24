@@ -13,7 +13,7 @@ pub fn spawn_jsonl_writer(path: PathBuf, mut rx: mpsc::Receiver<RawEvent>) -> to
             Ok(mut f) => {
                 while let Some(ev) = rx.recv().await {
                     match serde_json::to_vec(&ev) {
-                        Ok(mut v) => {
+                        Ok(v) => {
                             // serde_json::to_vec doesn't include newline; add it
                             if let Err(e) = f.write_all(&v).await {
                                 tracing::error!(error=%e, "failed to write jsonl bytes");

@@ -8,6 +8,11 @@ pub mod discover;
 pub mod gather;
 pub mod scoring;
 pub mod external;
+pub mod fuzz;
+pub mod analyze;
+pub mod http_client;
+pub mod concurrent;
+pub mod anonymizer;
 
 // re-export modules used in tests
 pub use crate::enrich::*;
