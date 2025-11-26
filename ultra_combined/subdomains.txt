@@ -1,0 +1,115 @@
+=== Subdomain Enumeration Results ===
+
+Total subdomains found: 95
+
+
+[dns-bruteforce] - 95 subdomains:
+  - logs.ultra.io
+  - email.ultra.io
+  - preprod.ultra.io
+  - kibana.ultra.io
+  - build.ultra.io
+  - api-staging.ultra.io
+  - api3.ultra.io
+  - management.ultra.io
+  - api-dev.ultra.io
+  - admin.ultra.io
+  - cd.ultra.io
+  - jenkins.ultra.io
+  - monitoring.ultra.io
+  - www.ultra.io
+  - pre-prod.ultra.io
+  - mgmt.ultra.io
+  - stage.ultra.io
+  - api-test.ultra.io
+  - backup.ultra.io
+  - s3.ultra.io
+  - android.ultra.io
+  - upload.ultra.io
+  - logging.ultra.io
+  - grafana.ultra.io
+  - api-prod.ultra.io
+  - documentation.ultra.io
+  - rc.ultra.io
+  - deprecated.ultra.io
+  - v3.ultra.io
+  - v5.ultra.io
+  - gitlab.ultra.io
+  - cdn.ultra.io
+  - development.ultra.io
+  - webmail.ultra.io
+  - v2.ultra.io
+  - v1.ultra.io
+  - v4.ultra.io
+  - mail.ultra.io
+  - canary.ultra.io
+  - api1.ultra.io
+  - m.ultra.io
+  - qa.ultra.io
+  - docs.ultra.io
+  - imap.ultra.io
+  - legacy.ultra.io
+  - testing.ultra.io
+  - rest.ultra.io
+  - intranet.ultra.io
+  - demo.ultra.io
+  - alpha.ultra.io
+  - develop.ultra.io
+  - private.ultra.io
+  - help.ultra.io
+  - console.ultra.io
+  - support.ultra.io
+  - api2.ultra.io
+  - mobile.ultra.io
+  - download.ultra.io
+  - assets.ultra.io
+  - portal.ultra.io
+  - api.ultra.io
+  - store.ultra.io
+  - storage.ultra.io
+  - test.ultra.io
+  - github.ultra.io
+  - static.ultra.io
+  - dashboard.ultra.io
+  - cloud.ultra.io
+  - graphql.ultra.io
+  - sandbox.ultra.io
+  - dev.ultra.io
+  - uat.ultra.io
+  - secure.ultra.io
+  - staging.ultra.io
+  - wiki.ultra.io
+  - gateway.ultra.io
+  - ci.ultra.io
+  - smtp.ultra.io
+  - shop.ultra.io
+  - web.ultra.io
+  - internal.ultra.io
+  - old.ultra.io
+  - app.ultra.io
+  - media.ultra.io
+  - administrator.ultra.io
+  - api-gateway.ultra.io
+  - apigw.ultra.io
+  - blog.ultra.io
+  - pop3.ultra.io
+  - preview.ultra.io
+  - monitor.ultra.io
+  - ios.ultra.io
+  - archive.ultra.io
+  - beta.ultra.io
+  - metrics.ultra.io
+
+[!] API-related subdomains (12):
+  [+] api-staging.ultra.io (from dns-bruteforce)
+  [+] api3.ultra.io (from dns-bruteforce)
+  [+] api-dev.ultra.io (from dns-bruteforce)
+  [+] api-test.ultra.io (from dns-bruteforce)
+  [+] api-prod.ultra.io (from dns-bruteforce)
+  [+] api1.ultra.io (from dns-bruteforce)
+  [+] rest.ultra.io (from dns-bruteforce)
+  [+] api2.ultra.io (from dns-bruteforce)
+  [+] api.ultra.io (from dns-bruteforce)
+  [+] graphql.ultra.io (from dns-bruteforce)
+  [+] api-gateway.ultra.io (from dns-bruteforce)
+  [+] apigw.ultra.io (from dns-bruteforce)

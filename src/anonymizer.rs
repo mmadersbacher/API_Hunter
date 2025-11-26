@@ -238,15 +238,15 @@ impl Anonymizer {
         
         // Residential Proxy verwenden falls verfügbar
         if let Some(proxy_url) = self.get_residential_proxy_url() {
-            println!("🏠 Residential Proxy: {} | UA: {}", 
+            println!("[*] Residential Proxy: {} | UA: {}", 
                      proxy_url.split('@').nth(1).unwrap_or("unknown").split(':').next().unwrap_or("?"),
                      &user_agent[..60]);
             
             let proxy = Proxy::all(&proxy_url)?;
             builder = builder.proxy(proxy);
         } else {
-            println!("⚠️  No residential proxy configured. Using direct connection.");
-            println!("💡 Set RESIDENTIAL_PROXY env: username:password@gate.provider.com:7000");
+            println!("[!] No residential proxy configured. Using direct connection.");
+            println!("[!] Set RESIDENTIAL_PROXY env: username:password@gate.provider.com:7000");
         }
 
         let client = builder.build()?;
@@ -299,14 +299,14 @@ impl Anonymizer {
 
     /// Gibt Anweisungen zur Residential Proxy Setup aus
     pub fn print_proxy_setup_instructions() {
-        println!("\n📖 Residential Proxy Setup Instructions:");
-        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        println!("🏠 Recommended Providers:");
-        println!("  • Smartproxy: https://smartproxy.com (rotating residential)");
-        println!("  • BrightData: https://brightdata.com (premium quality)");
-        println!("  • Oxylabs: https://oxylabs.io (enterprise grade)");
-        println!("  • Soax: https://soax.com (flexible plans)");
-        println!("\n⚙️  Configuration:");
+        println!("\n[*] Residential Proxy Setup Instructions:");
+        println!("{}", "=".repeat(60));
+        println!("[*] Recommended Providers:");
+        println!("  + Smartproxy: https://smartproxy.com (rotating residential)");
+        println!("  + BrightData: https://brightdata.com (premium quality)");
+        println!("  + Oxylabs: https://oxylabs.io (enterprise grade)");
+        println!("  + Soax: https://soax.com (flexible plans)");
+        println!("\n[*] Configuration:");
         println!("  1. Sign up for a residential proxy provider");
         println!("  2. Get your credentials (username:password@endpoint:port)");
         println!("  3. Set environment variable:");
@@ -316,17 +316,17 @@ impl Anonymizer {
         println!("     ");
         println!("     # Linux/macOS");
         println!("     export RESIDENTIAL_PROXY=\"user:pass@gate.smartproxy.com:7000\"");
-        println!("\n✅ Features:");
-        println!("  • Real residential IPs (not datacenter)");
-        println!("  • Sticky sessions (5-10 min per IP)");
-        println!("  • Automatic rotation");
-        println!("  • Human-like request patterns");
-        println!("  • Constant TLS fingerprint");
-        println!("  • DNS over HTTPS (DoH)");
-        println!("\n🚀 Usage:");
+        println!("\n[*] Features:");
+        println!("  + Real residential IPs (not datacenter)");
+        println!("  + Sticky sessions (5-10 min per IP)");
+        println!("  + Automatic rotation");
+        println!("  + Human-like request patterns");
+        println!("  + Constant TLS fingerprint");
+        println!("  + DNS over HTTPS (DoH)");
+        println!("\n[*] Usage:");
         println!("  cargo run --release -- scan https://target.com --anonymous");
         println!("  cargo run --release -- scan https://target.com --anonymous --full-speed");
-        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        println!("{}\n", "=".repeat(60));
     }
     
     /// Prüft ob Residential Proxy konfiguriert ist
@@ -336,19 +336,19 @@ impl Anonymizer {
     
     /// Gibt Status-Informationen aus
     pub fn print_status(&self) {
-        println!("🎭 Anonymous Mode Status:");
+        println!("[*] Anonymous Mode Status:");
         println!("  Proxy Type: Residential (Real IPs)");
         println!("  Session Duration: 5-10 minutes");
         println!("  TLS Fingerprint: {} (constant)", self.tls_fingerprint);
         println!("  User-Agent: {} (session-based)", 
                  &self.get_current_user_agent()[..50]);
         println!("  Request Pattern: Human-like (burst + pause)");
-        println!("  Full Speed: {}", if self.full_speed { "✅ ENABLED" } else { "❌ Disabled" });
+        println!("  Full Speed: {}", if self.full_speed { "ENABLED" } else { "Disabled" });
         
         if self.is_proxy_configured() {
-            println!("  Proxy Status: ✅ Configured");
+            println!("  Proxy Status: Configured");
         } else {
-            println!("  Proxy Status: ⚠️  Not configured (direct connection)");
+            println!("  Proxy Status: Not configured (direct connection)");
         }
     }
 }

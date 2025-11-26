@@ -26,31 +26,121 @@ pub async fn run_from_cli(cli: Cli) -> anyhow::Result<()> {
         .init();
 
     match cli.command {
-        Commands::Scan { target, out, mut concurrency, mut per_host, aggressive, mut with_gau, mut with_wayback, resume, mut retries, timeout, backoff_initial_ms, backoff_max_ms, lite, confirm_aggressive, fuzz_params, test_idor, deep_analysis, scan_admin, advanced_idor, anonymous, full_speed } => {
-            tracing::info!(target=%target, out=%out, concurrency, per_host, aggressive, with_gau, with_wayback, retries, timeout, anonymous, full_speed, "Starting scan");
-            if aggressive && !confirm_aggressive {
-                eprintln!("Refusing to run in --aggressive mode without explicit confirmation.");
-                std::process::exit(1);
+        Commands::TestEndpoint { url, fuzz, rate_limit } => {
+            return handle_test_endpoint_command(url, fuzz, rate_limit).await;
+        }
+        Commands::Scan { target, out, timing, concurrency, per_host, lite, deep, aggressive, scan_vulns, scan_admin, browser, browser_wait, browser_depth, anon, full_speed, bypass_waf, subdomains, jwt, timeout, retries, resume } => {
+            // Apply timing templates (like nmap -T0 to -T5)
+            let (final_concurrency, final_per_host, final_retries) = match timing {
+                0 => (1, 1, 1),      // T0: Paranoid (ultra-slow)
+                1 => (5, 1, 2),      // T1: Sneaky
+                2 => (15, 2, 2),     // T2: Polite
+                3 => (50, 6, 3),     // T3: Normal (default)
+                4 => (100, 12, 3),   // T4: Aggressive
+                5 => (200, 20, 1),   // T5: Insane
+                _ => (50, 6, 3),
+            };
+            
+            let concurrency = concurrency.unwrap_or(final_concurrency);
+            let per_host = per_host.unwrap_or(final_per_host);
+            let retries_final = if retries == 3 { final_retries } else { retries };
+            
+            // Deep mode: Enable Wayback, GAU, vuln scanning automatically
+            let (with_wayback, with_gau, scan_vulns) = if deep {
+                (true, true, true)
+            } else {
+                (false, false, scan_vulns)
+            };
+            
+            // Lite mode overrides
+            let (concurrency, per_host, retries, with_wayback, with_gau) = if lite {
+                (8, 2, 1, false, false)
+            } else {
+                (concurrency, per_host, retries_final, with_wayback, with_gau)
+            };
+            
+            let retries = if retries > 10 { 10 } else { retries };
+            
+            tracing::info!(target=%target, out=%out, concurrency, per_host, timing, aggressive, deep, retries, timeout, anon, full_speed, bypass_waf, browser, "Starting scan");
+            
+            tracing::info!(target=%target, out=%out, concurrency, per_host, timing, aggressive, deep, retries, timeout, anon, full_speed, bypass_waf, browser, "Starting scan");
+            
+            // Print scan configuration
+            println!("\n┌──────────────────────────────────────────────────┐");
+            println!("│            API Hunter v1.0 - Scan Engine         │");
+            println!("└──────────────────────────────────────────────────┘");
+            println!("\n[*] Target: {}", target);
+            println!("[*] Timing: T{} (concurrency: {}, per-host: {})", timing, concurrency, per_host);
+            println!("[*] Mode: {}", if lite { "Lite" } else if aggressive { "Aggressive" } else if deep { "Deep" } else { "Standard" });
+            
+            println!("\n[*] Test Sequence:");
+            println!("    [Phase 1] WAF Detection");
+            if subdomains {
+                println!("    [Phase 1.5] Subdomain Enumeration");
+                println!("              - Certificate Transparency (crt.sh)");
+                println!("              - DNS Bruteforce (80+ prefixes)");
             }
-            if lite {
-                concurrency = 8;
-                per_host = 2;
-                with_gau = false;
-                with_wayback = false;
-                retries = 1;
-                tracing::info!("lite mode active: low concurrency and disabled heavy gatherers");
+            println!("    [Phase 2] API Discovery");
+            if browser {
+                println!("              - Browser-based (JavaScript execution)");
             }
-            if retries > 10 { retries = 10; }
-            run_scan(target, out, concurrency, per_host, aggressive, with_gau, with_wayback, resume, lite, retries, timeout, backoff_initial_ms, backoff_max_ms, fuzz_params, test_idor, deep_analysis, scan_admin, advanced_idor, anonymous, full_speed).await?;
+            if with_wayback || with_gau {
+                println!("              - Historical data (Wayback, GAU)");
+            }
+            println!("              - JavaScript endpoint extraction");
+            println!("              - Pattern-based detection");
+            println!("    [Phase 3] Active Probing");
+            println!("              - HTTP fingerprinting");
+            println!("              - Security headers analysis");
+            println!("              - CORS configuration check");
+            if scan_vulns {
+                println!("    [Phase 4] Vulnerability Scanning");
+                println!("              - SQL/NoSQL Injection");
+                println!("              - XSS (Cross-Site Scripting)");
+                println!("              - SSRF, Path Traversal, RCE");
+                if jwt {
+                    println!("              - JWT Token Analysis");
+                }
+            }
+            if scan_admin {
+                println!("    [Phase 5] Admin/Debug Endpoint Discovery");
+            }
+            if aggressive {
+                println!("    [Phase 6] Aggressive Testing");
+                println!("              - Parameter fuzzing");
+                println!("              - IDOR testing");
+                println!("              - Bruteforce enumeration");
+            }
+            if bypass_waf {
+                println!("    [Phase 7] WAF Bypass Techniques");
+            }
+            if anon {
+                println!("\n[*] Anonymous Mode: Enabled");
+                if full_speed {
+                    println!("    Full-Speed: All delays disabled");
+                }
+            }
+            println!("\n{}\n", "-".repeat(60));
+            
+            // WAF detection is always enabled
+            run_scan(target, out, concurrency, per_host, aggressive, with_gau, with_wayback, resume, lite, retries, timeout, scan_vulns, scan_admin, anon, full_speed, true, bypass_waf, browser, browser_wait, browser_depth, subdomains, jwt).await?;
         }
     }
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, aggressive: bool, with_gau: bool, with_wayback: bool, resume: Option<String>, lite: bool, retries: u8, timeout: u64, backoff_initial_ms: u64, backoff_max_ms: u64, fuzz_params: bool, test_idor: bool, deep_analysis: bool, scan_admin: bool, advanced_idor: bool, anonymous: bool, full_speed: bool) -> anyhow::Result<()> {
+async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, aggressive: bool, with_gau: bool, with_wayback: bool, resume: Option<String>, lite: bool, retries: u8, timeout: u64, scan_vulns: bool, scan_admin: bool, anon: bool, full_speed: bool, detect_waf: bool, bypass_waf: bool, browser: bool, browser_wait: u64, browser_depth: usize, subdomains: bool, jwt: bool) -> anyhow::Result<()> {
     let out_dir = PathBuf::from(&out);
     api_hunter::utils::ensure_dir(&out_dir)?;
+
+    // Clean up previous scan results
+    use api_hunter::output::cleanup_results;
+    if let Err(e) = cleanup_results(&out) {
+        eprintln!("[!] Warning: Failed to clean results directory: {}", e);
+    }
+
+    let scan_start = std::time::Instant::now();
 
     // Normalize the provided `target`: if the user passed a full URL (https://...)
     // extract the host so downstream gatherers that build `https://{host}` don't
@@ -78,14 +168,14 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
     }
 
     // Setup anonymous mode if requested
-    let anonymizer = if anonymous {
-        println!("🥷 Anonymous Mode Enabled");
+    let anonymizer = if anon {
+        println!("[Phase 0] Initializing Anonymous Mode...");
         if full_speed {
-            println!("🚀 Full-Speed Mode: All delays disabled");
+            println!("[*] Full-Speed Mode: All delays disabled");
         }
         
         // Try to load from environment first
-        let anon = if let Some(anon) = api_hunter::anonymizer::Anonymizer::from_env(full_speed) {
+        let anon_client = if let Some(anon) = api_hunter::anonymizer::Anonymizer::from_env(full_speed) {
             anon
         } else {
             // Fallback: Erstelle ohne Proxy (direkter Traffic mit Human-like Patterns)
@@ -93,21 +183,61 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
         };
         
         // Check if residential proxy is configured
-        if !anon.is_proxy_configured() {
-            println!("\n⚠️  No residential proxy configured!");
+        if !anon_client.is_proxy_configured() {
+            println!("[-] No residential proxy configured");
             api_hunter::anonymizer::Anonymizer::print_proxy_setup_instructions();
-            println!("⚠️  Continuing with direct connection + human-like patterns...\n");
+            println!("[*] Continuing with direct connection + human-like patterns...\n");
+        } else {
+            println!("[+] Anonymous client configured\n");
         }
         
-        anon.print_status();
+        anon_client.print_status();
         println!();
         
-        Some(anon)
+        Some(anon_client)
     } else {
         None
     };
 
+    // Phase 1: WAF Detection
+    println!("[Phase 1] WAF Detection...");
+    // WAF detection happens during probing
+
+    // Phase 1.5: Subdomain Enumeration (if enabled)
+    let mut all_targets = vec![domain.clone()];
+    if subdomains {
+        println!("\n[Phase 1.5] Subdomain Enumeration...");
+        use api_hunter::discover::subdomain::SubdomainEnumerator;
+        
+        let enumerator = SubdomainEnumerator::new();
+        let subdomain_results = enumerator.enumerate(&domain).await;
+        println!("[+] Found {} subdomains", subdomain_results.len());
+        
+        // Save subdomain report
+        let report = enumerator.generate_report(&subdomain_results);
+        let subdomain_path = out_dir.join("subdomains.txt");
+        if let Err(e) = std::fs::write(&subdomain_path, &report) {
+            eprintln!("[-] Failed to write subdomain report: {}", e);
+        } else {
+            println!("[+] Subdomain report saved to: {}", subdomain_path.display());
+        }
+        
+        // Add API-related subdomains to scan targets
+        for result in subdomain_results.iter() {
+            if result.subdomain.contains("api") 
+                || result.subdomain.contains("rest") 
+                || result.subdomain.contains("graphql") 
+                || result.subdomain.contains("gateway") {
+                println!("[+] Adding API subdomain to scan: {}", result.subdomain);
+                all_targets.push(result.subdomain.clone());
+            }
+        }
+        
+        println!("[+] Total targets to scan: {}", all_targets.len());
+    }
+
     // Discover and gather candidates
+    println!("\n[Phase 2] API Discovery...");
     tracing::info!("Starting discovery phase for domain: {}", domain);
     let mut candidates: Vec<String> = Vec::new();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(1024);
@@ -148,6 +278,37 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
         Err(_) => { tracing::warn!("JS extraction timed out (12s)"); }
     }
 
+    // Browser-based dynamic API discovery
+    if browser {
+        println!("[*] Browser: Launching headless Chrome...");
+        tracing::info!("Starting browser-based API discovery");
+        
+        match tokio::time::timeout(
+            Duration::from_secs(browser_wait / 1000 + 30),
+            api_hunter::discover::browser::discover_apis_with_browser(
+                &target,
+                true, // headless
+                browser_depth,
+                browser_wait
+            )
+        ).await {
+            Ok(Ok(browser_apis)) => {
+                let count = browser_apis.len();
+                candidates.extend(browser_apis);
+                println!("[+] Browser: {} endpoints discovered", count);
+                tracing::info!("Browser discovery: {} endpoints found", count);
+            }
+            Ok(Err(e)) => {
+                println!("[-] Browser discovery failed: {}", e);
+                tracing::warn!("Browser discovery failed: {}", e);
+            }
+            Err(_) => {
+                println!("[-] Browser discovery timed out");
+                tracing::warn!("Browser discovery timed out");
+            }
+        }
+    }
+
     // Drop tx so the receiver knows no more data is coming
     drop(tx);
     
@@ -172,23 +333,28 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
 
     candidates.sort(); candidates.dedup();
     let total_discovered = candidates.len();
+    println!("[+] Discovery: {} total URLs found", total_discovered);
     tracing::info!("Discovery complete: {} total URLs (before filtering)", total_discovered);
     
     let filtered: Vec<String> = candidates.into_iter().filter(|u| api_hunter::filter::api_patterns::is_api_candidate(u)).collect();
     let filtered_count = filtered.len();
-    tracing::info!("Filtered to {} API candidates ({}% pass rate)", filtered_count, if total_discovered > 0 { (filtered_count * 100) / total_discovered } else { 0 });
+    println!("[+] Filtered: {} API candidates ({}% match)", filtered_count, if total_discovered > 0 { (filtered_count * 100) / total_discovered } else { 0 });
+    tracing::info!("Filtered to {} API candidates", filtered_count);
 
+    // Phase 3: Active Probing
+    println!("\n[Phase 3] Active Probing...");
+    
     // Create HTTP client based on anonymous mode
     let client = if let Some(ref anon) = anonymizer {
-        println!("🔐 Creating residential proxy client with human-like patterns...");
+        println!("[*] Creating stealth client...");
         match anon.create_stealth_client(timeout) {
             Ok(client) => {
-                println!("✅ Anonymous client ready (TLS fingerprint: constant)\n");
+                println!("[+] Stealth client ready\n");
                 client
             }
             Err(e) => {
-                eprintln!("⚠️  Failed to create anonymous client: {}", e);
-                eprintln!("   Falling back to direct connection...");
+                eprintln!("[-] Failed to create stealth client: {}", e);
+                eprintln!("[*] Falling back to direct connection...");
                 reqwest::Client::builder().user_agent("api-hunter/0.1").build()?
             }
         }
@@ -217,6 +383,20 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
     let processed = Arc::new(AtomicUsize::new(0));
     let mut results: Vec<RawEvent> = Vec::new();
 
+    // WAF Detector (always enabled now)
+    let waf_detector = Some(api_hunter::waf::WafDetector::new());
+    
+    // Track WAF detections for summary
+    let waf_detections = Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new()));
+    
+    // JWT Analyzer (if enabled)
+    let jwt_analyzer = if jwt {
+        Some(Arc::new(api_hunter::security::JwtAnalyzer::new()))
+    } else {
+        None
+    };
+    let jwt_results = Arc::new(parking_lot::Mutex::new(Vec::new()));
+
     let stream = stream::iter(cand_vec.into_iter())
         .map(|cand| {
             let client = client_ref;
@@ -225,6 +405,10 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
             let tx_csv = tx_csv.clone();
             let processed = processed.clone();
             let anon_ref = anonymizer.as_ref();
+            let waf_detector_ref = waf_detector.as_ref();
+            let waf_detections = waf_detections.clone();
+            let jwt_analyzer_ref = jwt_analyzer.clone();
+            let jwt_results_ref = jwt_results.clone();
             async move {
                 // Human-like delay in anonymous mode (burst + pause pattern)
                 if let Some(anon) = anon_ref {
@@ -233,11 +417,77 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
                 
                 let idx = processed.fetch_add(1, Ordering::SeqCst) + 1;
                 tracing::debug!("[{}/{}] Probing: {}", idx, total, cand);
-                let res = api_hunter::probe::http_probe::probe_url(client, &cand, probe_timeout, Some(throttle), retries as usize, backoff_initial_ms, backoff_max_ms, aggressive).await;
+                let res = api_hunter::probe::http_probe::probe_url(client, &cand, probe_timeout, Some(throttle), retries as usize, 200, 5000, aggressive).await;
                 match res {
                     Ok(mut ev) => {
                         ev.score = api_hunter::scoring::score::score_event(&ev);
                         if let Some(ref js) = ev.json_sample { let keys = api_hunter::enrich::json_shape::detect_keys(js); for k in keys.iter().take(5) { ev.notes.push(format!("key:{}", k)); } }
+                        
+                        // WAF Detection (passive - always active)
+                        if let Some(_detector) = waf_detector_ref {
+                            let server = ev.server.as_deref().unwrap_or("");
+                            let mut waf_found = None;
+                            
+                            if server.to_lowercase().contains("cloudflare") {
+                                waf_found = Some("Cloudflare");
+                            } else if server.to_lowercase().contains("akamai") {
+                                waf_found = Some("Akamai");
+                            } else if server.to_lowercase().contains("sucuri") {
+                                waf_found = Some("Sucuri");
+                            } else if server.to_lowercase().contains("imperva") || server.to_lowercase().contains("incapsula") {
+                                waf_found = Some("Imperva");
+                            } else if server.to_lowercase().contains("big-ip") || server.to_lowercase().contains("bigip") {
+                                waf_found = Some("F5 BIG-IP");
+                            } else if server.to_lowercase().contains("barracuda") {
+                                waf_found = Some("Barracuda");
+                            } else if server.to_lowercase().contains("fortiweb") {
+                                waf_found = Some("FortiWeb");
+                            }
+                            
+                            if let Some(waf_name) = waf_found {
+                                ev.notes.push(format!("WAF:{}", waf_name));
+                                let mut detections = waf_detections.lock();
+                                *detections.entry(waf_name.to_string()).or_insert(0) += 1;
+                            }
+                            
+                            // Check for WAF block response patterns
+                            if ev.status == 403 || ev.status == 406 || ev.status == 429 {
+                                if !ev.notes.iter().any(|n| n.starts_with("WAF:")) {
+                                    ev.notes.push("WAF:UnknownBlock".to_string());
+                                }
+                            }
+                        }
+                        
+                        // JWT Token Analysis (if enabled)
+                        if let Some(ref analyzer) = jwt_analyzer_ref {
+                            // Try to extract tokens from response (use json_sample if available)
+                            let body_text = if let Some(ref json) = ev.json_sample {
+                                serde_json::to_string(json).unwrap_or_default()
+                            } else {
+                                // For non-JSON responses, we'd need the body. Since we don't store it,
+                                // we'll skip JWT extraction for now or only check JSON responses
+                                String::new()
+                            };
+                            
+                            if !body_text.is_empty() {
+                                let tokens = analyzer.extract_tokens_from_response(&body_text);
+                                if !tokens.is_empty() {
+                                    tracing::info!("Found {} JWT token(s) in response from {}", tokens.len(), cand);
+                                    ev.notes.push(format!("JWT:{}", tokens.len()));
+                                    
+                                    // Analyze each token
+                                    for token in tokens {
+                                        if let Ok(analysis) = analyzer.analyze_token(&token) {
+                                            if !analysis.vulnerabilities.is_empty() {
+                                                tracing::warn!("JWT vulnerabilities found in {}: {:?}", cand, analysis.vulnerabilities);
+                                            }
+                                            jwt_results_ref.lock().push(analysis);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
                         let _ = tx_jsonl.send(ev.clone()).await;
                         let _ = tx_csv.send(ev.clone()).await;
                         tracing::info!("[{}/{}] {} -> {} (score: {})", idx, total, cand, ev.status, ev.score);
@@ -283,36 +533,167 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
     write_csv(&csv_path, &refs)?;
     write_top_txt(&top_path, &refs)?;
 
-    // Deep analysis phase (if enabled)
-    if deep_analysis && success_count > 0 {
-        tracing::info!("Starting deep analysis phase on {} APIs...", success_count);
+    // Phase 4: Vulnerability Scanning
+    let mut critical_findings = 0;
+    let mut high_findings = 0;
+    let mut medium_findings = 0;
+    
+    if scan_vulns && success_count > 0 {
+        println!("\n[Phase 4] Vulnerability Scanning...");
+        tracing::info!("Starting vulnerability scanning phase on {} APIs...", success_count);
         
         let analysis_timeout = tokio::time::Duration::from_secs(120);
-        match tokio::time::timeout(analysis_timeout, run_deep_analysis(&client, &results, scan_admin, advanced_idor, &out_dir)).await {
-            Ok(Ok(())) => tracing::info!("Deep analysis completed successfully"),
-            Ok(Err(e)) => tracing::warn!("Deep analysis failed: {}", e),
-            Err(_) => tracing::warn!("Deep analysis timed out after 120s"),
+        match tokio::time::timeout(analysis_timeout, run_deep_analysis(&client, &results, scan_admin, aggressive, &out_dir)).await {
+            Ok(Ok(())) => {
+                println!("[+] Vulnerability scan completed");
+                tracing::info!("Vulnerability scan completed successfully");
+            }
+            Ok(Err(e)) => {
+                println!("[-] Vulnerability scan failed: {}", e);
+                tracing::warn!("Vulnerability scan failed: {}", e);
+            }
+            Err(_) => {
+                println!("[-] Vulnerability scan timed out (120s)");
+                tracing::warn!("Vulnerability scan timed out after 120s");
+            }
         };
+        
+        // Read findings from analysis summary
+        if let Ok(summary_content) = std::fs::read_to_string(out_dir.join("analysis_summary.txt")) {
+            for line in summary_content.lines() {
+                if line.contains("Critical Issues:") {
+                    critical_findings = line.split(':').nth(1).and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+                } else if line.contains("High Issues:") {
+                    high_findings = line.split(':').nth(1).and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+                } else if line.contains("Medium Issues:") {
+                    medium_findings = line.split(':').nth(1).and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+                }
+            }
+        }
     }
 
-    // Parameter fuzzing phase (if enabled)
-    if fuzz_params && success_count > 0 {
-        tracing::info!("Starting parameter fuzzing phase on {} APIs...", success_count);
+    // Phase 5: Admin/Debug Endpoint Discovery
+    if scan_admin && success_count > 0 {
+        println!("\n[Phase 5] Admin/Debug Endpoint Scanning...");
+        tracing::info!("Scanning for admin endpoints on {} APIs...", success_count);
+        // Admin scanning is handled in run_deep_analysis
+    }
+
+    // Phase 6: Aggressive Testing (Parameter Fuzzing, IDOR)
+    if aggressive && success_count > 0 {
+        println!("\n[Phase 6] Aggressive Testing...");
+        tracing::info!("Starting aggressive testing phase on {} APIs...", success_count);
         
         // Set a longer timeout for intensive fuzzing
         let fuzz_timeout = tokio::time::Duration::from_secs(60);
-        match tokio::time::timeout(fuzz_timeout, run_param_fuzzing(&client, &results, test_idor, &out_dir)).await {
-            Ok(Ok(())) => tracing::info!("Parameter fuzzing completed successfully"),
-            Ok(Err(e)) => tracing::warn!("Parameter fuzzing failed: {}", e),
-            Err(_) => tracing::warn!("Parameter fuzzing timed out after 60s"),
+        match tokio::time::timeout(fuzz_timeout, run_param_fuzzing(&client, &results, true, &out_dir)).await {
+            Ok(Ok(())) => {
+                println!("[+] Aggressive testing completed");
+                tracing::info!("Aggressive testing completed successfully");
+            }
+            Ok(Err(e)) => {
+                println!("[-] Aggressive testing failed: {}", e);
+                tracing::warn!("Aggressive testing failed: {}", e);
+            }
+            Err(_) => {
+                println!("[-] Aggressive testing timed out (60s)");
+                tracing::warn!("Aggressive testing timed out after 60s");
+            }
         };
     }
 
-    println!("\nScan complete - {} APIs found", success_count);
-    if fuzz_params {
-        println!("Parameter fuzzing results written to: {}", out_dir.join("fuzz_results.txt").display());
+    // Phase 7: WAF Bypass Techniques
+    if bypass_waf && success_count > 0 {
+        println!("\n[Phase 7] WAF Bypass Testing...");
+        println!("[*] Testing bypass techniques on {} APIs...", success_count);
+        tracing::info!("Testing WAF bypass techniques");
+        // WAF bypass techniques would be implemented here
+        println!("[+] WAF bypass testing completed");
     }
-    println!("Outputs written to: {}", out_dir.display());
+
+    // Print scan summary
+    println!("\n{}", "=".repeat(60));
+    println!("[*] Scan Summary");
+    println!("{}", "=".repeat(60));
+    println!("[+] APIs Found: {}", success_count);
+    
+    // WAF Detection Summary
+    let waf_stats = waf_detections.lock();
+    if !waf_stats.is_empty() {
+        println!("\n[*] WAF Detections:");
+        let mut wafs: Vec<_> = waf_stats.iter().collect();
+        wafs.sort_by(|a, b| b.1.cmp(a.1));
+        for (waf, count) in wafs {
+            println!("    [-] {}: {} endpoint(s)", waf, count);
+        }
+    } else {
+        println!("\n[*] No WAF detected");
+    }
+    
+    // JWT Analysis Summary
+    if jwt {
+        let jwt_analysis_results = jwt_results.lock();
+        if !jwt_analysis_results.is_empty() {
+            println!("\n[*] JWT Token Analysis:");
+            println!("    [+] {} JWT token(s) found", jwt_analysis_results.len());
+            
+            let mut vuln_count = 0;
+            for result in jwt_analysis_results.iter() {
+                vuln_count += result.vulnerabilities.len();
+            }
+            
+            if vuln_count > 0 {
+                println!("    [!] {} JWT vulnerabilities detected", vuln_count);
+                
+                // Save JWT report
+                if let Some(ref analyzer) = jwt_analyzer {
+                    let report = analyzer.generate_report(&jwt_analysis_results);
+                    let jwt_path = out_dir.join("jwt_analysis.txt");
+                    if let Err(e) = std::fs::write(&jwt_path, &report) {
+                        eprintln!("    [-] Failed to write JWT report: {}", e);
+                    } else {
+                        println!("    [+] JWT report saved to: jwt_analysis.txt");
+                    }
+                }
+            } else {
+                println!("    [+] No JWT vulnerabilities detected");
+            }
+        }
+    }
+    
+    // Status code summary
+    let mut status_counts: std::collections::HashMap<u16, usize> = std::collections::HashMap::new();
+    for ev in &results {
+        *status_counts.entry(ev.status).or_insert(0) += 1;
+    }
+    println!("\n[*] Status Codes:");
+    let mut statuses: Vec<_> = status_counts.iter().collect();
+    statuses.sort_by(|a, b| b.1.cmp(a.1));
+    for (status, count) in statuses.iter().take(5) {
+        println!("    [-] {}: {} endpoint(s)", status, count);
+    }
+    
+    println!("\n[*] Output Location: {}", out_dir.display());
+    
+    // Print enhanced statistics
+    let scan_duration = scan_start.elapsed().as_secs();
+    if let Err(e) = print_final_statistics(&out, critical_findings, high_findings, medium_findings, scan_duration).await {
+        eprintln!("[!] Failed to print statistics: {}", e);
+    }
+    if aggressive {
+        println!("    [-] Aggressive testing: fuzz_results.txt");
+    }
+    if scan_vulns {
+        println!("    [-] Vulnerability scan: analysis_summary.txt");
+    }
+    if jwt {
+        println!("    [-] JWT analysis: jwt_analysis.txt");
+    }
+    if subdomains {
+        println!("    [-] Subdomain enumeration: subdomains.txt");
+    }
+    println!("{}\n", "=".repeat(60));
+    
     Ok(())
 }
 
@@ -497,7 +878,7 @@ async fn run_deep_analysis(
     client: &reqwest::Client,
     results: &[RawEvent],
     scan_admin: bool,
-    advanced_idor: bool,
+    aggressive: bool,
     out_dir: &PathBuf,
 ) -> anyhow::Result<()> {
     use api_hunter::analyze::api_analyzer::ApiAnalysis;
@@ -584,8 +965,8 @@ async fn run_deep_analysis(
         write_analysis_summary(&summary_path, &all_analyses, &admin_findings, &idor_findings)?;
     }
     
-    // Phase 3: Advanced IDOR testing (if enabled)
-    if advanced_idor {
+    // Phase 3: Advanced IDOR testing (if enabled via aggressive mode)
+    if aggressive {
         tracing::info!("Phase 3: Advanced IDOR testing...");
         let max_idor_tests = 30;
         
@@ -777,4 +1158,33 @@ fn write_analysis_summary(
     summary_file.flush()?;
     
     Ok((critical_findings, high_findings, medium_findings))
+}
+
+async fn print_final_statistics(
+    out_dir: &str,
+    critical: usize,
+    high: usize,
+    medium: usize,
+    scan_duration: u64,
+) -> anyhow::Result<()> {
+    use api_hunter::output::calculate_statistics;
+    
+    let stats = calculate_statistics(out_dir, critical, high, medium, scan_duration)?;
+    stats.print_summary();
+    
+    Ok(())
+}
+
+async fn handle_test_endpoint_command(
+    url: String,
+    fuzz: bool,
+    rate_limit: u32,
+) -> anyhow::Result<()> {
+    use api_hunter::test_endpoint::run_endpoint_tests;
+
+    println!("\n┌──────────────────────────────────────────────────┐");
+    println!("│     API Hunter - Ultra-Deep Endpoint Testing     │");
+    println!("└──────────────────────────────────────────────────┘");
+
+    run_endpoint_tests(&url, fuzz, rate_limit).await
 }

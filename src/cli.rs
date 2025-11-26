@@ -23,84 +23,98 @@ pub enum Commands {
         target: String,
 
         /// Output directory
-        #[arg(short, long, default_value = "./results")]
+        #[arg(short = 'o', long, default_value = "./results")]
         out: String,
 
-        /// Global concurrency
-        #[arg(long, default_value_t = 50)]
-        concurrency: u16,
-
-        /// Per-host limit
-        #[arg(long, default_value_t = 6)]
-        per_host: u16,
-
-        /// Enable aggressive features (ffuf bruteforce)
+        /// Conservative low-impact mode (fast, passive)
         #[arg(long, default_value_t = false)]
+        lite: bool,
+
+        /// Deep analysis: Wayback, GAU, JS extraction, vuln scanning
+        #[arg(long, default_value_t = false)]
+        deep: bool,
+
+        /// Aggressive mode: Bruteforce, admin paths, parameter fuzzing
+        #[arg(short = 'A', long, default_value_t = false)]
         aggressive: bool,
 
-        /// Use gau if available
-        #[arg(long, default_value_t = false)]
-        with_gau: bool,
+        /// Scan for vulnerabilities (SQLi, XSS, RCE, SSRF, etc.) - like nmap -sV
+        #[arg(long = "sV", default_value_t = false)]
+        scan_vulns: bool,
 
-        /// Use waybackurls if available
+        /// Scan for admin/debug endpoints - like nmap -sA
+        #[arg(long = "sA", default_value_t = false)]
+        scan_admin: bool,
+
+        /// Enable headless browser for dynamic API discovery
+        #[arg(short = 'B', long, default_value_t = false)]
+        browser: bool,
+
+        /// Browser wait time in ms (default: 3000)
+        #[arg(long, default_value_t = 3000_u64)]
+        browser_wait: u64,
+
+        /// Browser crawl depth (default: 1)
+        #[arg(long, default_value_t = 1_usize)]
+        browser_depth: usize,
+
+        /// Anonymous mode: Residential proxies + human-like patterns
         #[arg(long, default_value_t = false)]
-        with_wayback: bool,
+        anon: bool,
+
+        /// Full-speed mode: Skip delays (use with --anon)
+        #[arg(long, default_value_t = false)]
+        full_speed: bool,
+
+        /// Enable WAF bypass techniques
+        #[arg(long, default_value_t = false)]
+        bypass_waf: bool,
+
+        /// Enable subdomain enumeration (crt.sh + DNS bruteforce)
+        #[arg(long, default_value_t = false)]
+        subdomains: bool,
+
+        /// Analyze JWT tokens in responses
+        #[arg(long, default_value_t = false)]
+        jwt: bool,
+
+        /// Timing template: T0 (paranoid) to T5 (insane) - like nmap -T4
+        #[arg(short = 'T', long, value_parser = clap::value_parser!(u8).range(0..=5), default_value_t = 3)]
+        timing: u8,
+
+        /// Global concurrency (overrides -T template)
+        #[arg(short = 'c', long)]
+        concurrency: Option<u16>,
+
+        /// Per-host limit (overrides -T template)
+        #[arg(long)]
+        per_host: Option<u16>,
+
+        /// Request timeout in seconds (default: 10)
+        #[arg(long, default_value_t = 10_u64)]
+        timeout: u64,
+
+        /// Number of retries (default: 3, max: 10)
+        #[arg(short = 'r', long, default_value_t = 3_u8)]
+        retries: u8,
 
         /// Resume from existing JSONL
         #[arg(long)]
         resume: Option<String>,
+    },
 
-        /// Number of probe retries (default: 3, max: 10)
-        #[arg(long, default_value_t = 3_u8)]
-        retries: u8,
+    /// Ultra-deep endpoint testing with all security checks
+    TestEndpoint {
+        /// API endpoint URL to test
+        url: String,
 
-        /// Per-request timeout in seconds (default: 10)
-        #[arg(long, default_value_t = 10_u64)]
-        timeout: u64,
+        /// Include fuzzing tests (SQLi, XSS, SSRF, etc.)
+        #[arg(short = 'F', long, default_value_t = false)]
+        fuzz: bool,
 
-        /// Initial backoff in milliseconds (default: 200)
-        #[arg(long, default_value_t = 200_u64)]
-        backoff_initial_ms: u64,
-
-        /// Maximum backoff in milliseconds (default: 5000)
-        #[arg(long, default_value_t = 5000_u64)]
-        backoff_max_ms: u64,
-
-        /// Conservative low-impact "lite" mode (reduces concurrency/timeouts, disables heavy gatherers)
-        #[arg(long, default_value_t = false)]
-        lite: bool,
-
-        /// Confirm you have explicit permission to run aggressive scans (required when --aggressive used)
-        #[arg(long, default_value_t = false)]
-        confirm_aggressive: bool,
-
-        /// Enable parameter fuzzing to discover hidden parameters
-        #[arg(long, default_value_t = false)]
-        fuzz_params: bool,
-
-        /// Test for IDOR vulnerabilities on ID parameters
-        #[arg(long, default_value_t = false)]
-        test_idor: bool,
-
-        /// Deep analysis mode: analyze headers, CORS, security, fingerprint technologies
-        #[arg(long, default_value_t = false)]
-        deep_analysis: bool,
-
-        /// Scan for admin/debug endpoints
-        #[arg(long, default_value_t = false)]
-        scan_admin: bool,
-
-        /// Advanced IDOR testing with multiple techniques
-        #[arg(long, default_value_t = false)]
-        advanced_idor: bool,
-
-        /// Anonymous mode: Route traffic through residential proxies with human-like patterns
-        #[arg(long, default_value_t = false)]
-        anonymous: bool,
-
-        /// Full-speed mode: Skip all delays and rate limiting (still anonymous)
-        #[arg(long, default_value_t = false)]
-        full_speed: bool,
+        /// Number of requests for rate limit testing (default: 100)
+        #[arg(short = 'n', long, default_value_t = 100)]
+        rate_limit: u32,
     },
 }
 

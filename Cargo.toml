@@ -32,6 +32,13 @@ html-escape = "0.2"            # For XSS testing
 rand = "0.8"                   # Random number generation for anonymization
 trust-dns-resolver = "0.23"    # DNS over HTTPS (DoH) support
 hickory-resolver = "0.24"      # Modern DNS resolver with DoH
+# Browser automation for dynamic API discovery
+headless_chrome = "1.0"        # Chrome DevTools Protocol
+chromiumoxide = "0.7"          # High-level Chrome automation
+async-trait = "0.1"            # Async traits
+hmac = "0.12"                   # HMAC for JWT verification
+sha2 = "0.10"                   # SHA-256 hashing
+base64 = "0.21"                 # Base64 encoding/decoding
 
 [profile.release]
 opt-level = 3

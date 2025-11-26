@@ -13,6 +13,9 @@ pub mod analyze;
 pub mod http_client;
 pub mod concurrent;
 pub mod anonymizer;
+pub mod waf;
+pub mod test_endpoint;
+pub mod security;
 
 // re-export modules used in tests
 pub use crate::enrich::*;

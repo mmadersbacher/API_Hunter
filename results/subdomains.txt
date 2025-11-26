@@ -1,0 +1,21 @@
+=== Subdomain Enumeration Results ===
+
+Total subdomains found: 12
+
+
+[dns-bruteforce] - 12 subdomains:
+  - wiki.github.com
+  - api.github.com
+  - test.github.com
+  - blog.github.com
+  - help.github.com
+  - docs.github.com
+  - github.github.com
+  - smtp.github.com
+  - shop.github.com
+  - www.github.com
+  - support.github.com
+  - admin.github.com
+
+[!] API-related subdomains (1):
+  [+] api.github.com (from dns-bruteforce)
