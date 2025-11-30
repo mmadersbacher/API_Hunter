@@ -1,90 +1,125 @@
 use clap::Parser;
 
 #[derive(clap::Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about = "API Hunter - Advanced API Security Scanner",
+    long_about = None,
+    after_help = "EXAMPLES:
+  Basic scan:
+    apihunter scan example.com
+
+  Deep security scan:
+    apihunter scan example.com --deep --sV
+
+  Anonymous stealth scan:
+    apihunter scan example.com --anon --lite -T1
+
+  Full aggressive scan:
+    apihunter scan example.com -A --deep --sV --sA
+
+  Scan multiple domains:
+    apihunter scan domains.txt -o ./results
+
+For more information: https://github.com/mmadersbacher/API_Hunter"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Enable detailed debug logging (global)
-    #[arg(long, default_value_t = false)]
+    /// Enable detailed debug logging
+    #[arg(long, global = true)]
     pub debug: bool,
 
-    /// Enable verbose logging (global)
-    #[arg(long, default_value_t = false)]
+    /// Enable verbose output
+    #[arg(long, global = true)]
     pub verbose: bool,
 }
 
 #[derive(clap::Subcommand, Debug)]
 pub enum Commands {
-    /// Run a scan against a domain or file with domains
+    #[command(
+        about = "Run a scan against a domain or file with domains",
+        long_about = "Scan a target domain for API endpoints and security vulnerabilities.\n\nScan Modes:\n  --lite          Fast passive scan\n  --deep          Deep analysis (Wayback, JS extraction, vuln scanning)\n  -A              Aggressive mode (bruteforce, admin paths, fuzzing)\n  --sV            Vulnerability scanning (like nmap)\n  --sA            Admin endpoint scanning (like nmap)"
+    )]
     Scan {
-        /// Target domain (e.g. example.com) or path to file with newline-delimited domains
+        /// Target domain (e.g., example.com) or path to file with newline-delimited domains
         target: String,
 
-        /// Output directory
-        #[arg(short = 'o', long, default_value = "./results")]
-        out: String,
+        // === OUTPUT OPTIONS ===
+        /// Output directory [default: ./results]
+        #[arg(short = 'o', long)]
+        out: Option<String>,
 
+        /// Save detailed report to file (JSON or TXT format)
+        #[arg(long, value_name = "FILE")]
+        report: Option<String>,
+
+        // === SCAN MODES ===
         /// Conservative low-impact mode (fast, passive)
-        #[arg(long, default_value_t = false)]
+        #[arg(long)]
         lite: bool,
 
         /// Deep analysis: Wayback, GAU, JS extraction, vuln scanning
-        #[arg(long, default_value_t = false)]
+        #[arg(long)]
         deep: bool,
 
         /// Aggressive mode: Bruteforce, admin paths, parameter fuzzing
-        #[arg(short = 'A', long, default_value_t = false)]
+        #[arg(short = 'A', long)]
         aggressive: bool,
 
-        /// Scan for vulnerabilities (SQLi, XSS, RCE, SSRF, etc.) - like nmap -sV
-        #[arg(long = "sV", default_value_t = false)]
+        // === SECURITY SCANNING ===
+        /// Scan for vulnerabilities (SQLi, XSS, RCE, SSRF, etc.)
+        #[arg(long = "sV")]
         scan_vulns: bool,
 
-        /// Scan for admin/debug endpoints - like nmap -sA
-        #[arg(long = "sA", default_value_t = false)]
+        /// Scan for admin/debug endpoints
+        #[arg(long = "sA")]
         scan_admin: bool,
 
+        /// Analyze JWT tokens in responses
+        #[arg(long)]
+        jwt: bool,
+
+        /// Deep JavaScript analysis: Extract endpoints, tokens, secrets
+        #[arg(long)]
+        deep_js: bool,
+
+        // === DISCOVERY OPTIONS ===
+        /// Enable subdomain enumeration (crt.sh + DNS bruteforce)
+        #[arg(long)]
+        subdomains: bool,
+
         /// Enable headless browser for dynamic API discovery
-        #[arg(short = 'B', long, default_value_t = false)]
+        #[arg(short = 'B', long)]
         browser: bool,
 
-        /// Browser wait time in ms (default: 3000)
-        #[arg(long, default_value_t = 3000_u64)]
-        browser_wait: u64,
+        /// Browser wait time in ms [default: 3000]
+        #[arg(long)]
+        browser_wait: Option<u64>,
 
-        /// Browser crawl depth (default: 1)
-        #[arg(long, default_value_t = 1_usize)]
-        browser_depth: usize,
+        /// Browser crawl depth [default: 1]
+        #[arg(long)]
+        browser_depth: Option<usize>,
 
+        // === STEALTH & EVASION ===
         /// Anonymous mode: Residential proxies + human-like patterns
-        #[arg(long, default_value_t = false)]
+        #[arg(long)]
         anon: bool,
 
         /// Full-speed mode: Skip delays (use with --anon)
-        #[arg(long, default_value_t = false)]
+        #[arg(long)]
         full_speed: bool,
 
         /// Enable WAF bypass techniques
-        #[arg(long, default_value_t = false)]
+        #[arg(long)]
         bypass_waf: bool,
 
-        /// Enable subdomain enumeration (crt.sh + DNS bruteforce)
-        #[arg(long, default_value_t = false)]
-        subdomains: bool,
-
-        /// Analyze JWT tokens in responses
-        #[arg(long, default_value_t = false)]
-        jwt: bool,
-
-        /// Deep JavaScript analysis: Extract API endpoints, tokens, secrets, parameters from all JS files
-        #[arg(long, default_value_t = false)]
-        deep_js: bool,
-
-        /// Timing template: T0 (paranoid) to T5 (insane) - like nmap -T4
-        #[arg(short = 'T', long, value_parser = clap::value_parser!(u8).range(0..=5), default_value_t = 3)]
-        timing: u8,
+        // === TIMING & PERFORMANCE ===
+        /// Timing template: T0 (paranoid) to T5 (insane) [default: T3]
+        #[arg(short = 'T', long, value_parser = clap::value_parser!(u8).range(0..=5))]
+        timing: Option<u8>,
 
         /// Global concurrency (overrides -T template)
         #[arg(short = 'c', long)]
@@ -94,35 +129,35 @@ pub enum Commands {
         #[arg(long)]
         per_host: Option<u16>,
 
-        /// Request timeout in seconds (default: 10)
-        #[arg(long, default_value_t = 10_u64)]
-        timeout: u64,
+        /// Request timeout in seconds [default: 10]
+        #[arg(long)]
+        timeout: Option<u64>,
 
-        /// Number of retries (default: 3, max: 10)
-        #[arg(short = 'r', long, default_value_t = 3_u8)]
-        retries: u8,
+        /// Number of retries [default: 3, max: 10]
+        #[arg(short = 'r', long)]
+        retries: Option<u8>,
 
+        // === RESUME ===
         /// Resume from existing JSONL
         #[arg(long)]
         resume: Option<String>,
-
-        /// Save detailed report to file (JSON or TXT format)
-        #[arg(long, value_name = "FILE")]
-        report: Option<String>,
     },
 
-    /// Ultra-deep endpoint testing with all security checks
+    #[command(
+        about = "Ultra-deep endpoint testing with all security checks",
+        long_about = "Test a single API endpoint with comprehensive security analysis.\n\nIncludes: CORS, headers, TLS, rate limiting, JWT analysis, and optional fuzzing."
+    )]
     TestEndpoint {
         /// API endpoint URL to test
         url: String,
 
         /// Include fuzzing tests (SQLi, XSS, SSRF, etc.)
-        #[arg(short = 'F', long, default_value_t = false)]
+        #[arg(short = 'F', long)]
         fuzz: bool,
 
-        /// Number of requests for rate limit testing (default: 100)
-        #[arg(short = 'n', long, default_value_t = 100)]
-        rate_limit: u32,
+        /// Number of requests for rate limit testing [default: 100]
+        #[arg(short = 'n', long)]
+        rate_limit: Option<u32>,
     },
 }
 

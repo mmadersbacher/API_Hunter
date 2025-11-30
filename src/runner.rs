@@ -39,9 +39,18 @@ pub async fn run_from_cli(cli: Cli) -> anyhow::Result<()> {
 
     match cli.command {
         Commands::TestEndpoint { url, fuzz, rate_limit } => {
+            let rate_limit = rate_limit.unwrap_or(100);
             return handle_test_endpoint_command(url, fuzz, rate_limit).await;
         }
         Commands::Scan { target, out, timing, concurrency, per_host, lite, deep, aggressive, scan_vulns, scan_admin, browser, browser_wait, browser_depth, anon, full_speed, bypass_waf, subdomains, jwt, deep_js, timeout, retries, resume, report } => {
+            // Set defaults
+            let out = out.unwrap_or_else(|| "./results".to_string());
+            let timing = timing.unwrap_or(3);
+            let timeout = timeout.unwrap_or(10);
+            let retries = retries.unwrap_or(3);
+            let browser_wait = browser_wait.unwrap_or(3000);
+            let browser_depth = browser_depth.unwrap_or(1);
+
             // Apply timing templates (like nmap -T0 to -T5)
             let (final_concurrency, final_per_host, final_retries) = match timing {
                 0 => (1, 1, 1),      // T0: Paranoid (ultra-slow)
@@ -72,8 +81,6 @@ pub async fn run_from_cli(cli: Cli) -> anyhow::Result<()> {
             };
             
             let retries = if retries > 10 { 10 } else { retries };
-            
-            tracing::info!(target=%target, out=%out, concurrency, per_host, timing, aggressive, deep, retries, timeout, anon, full_speed, bypass_waf, browser, "Starting scan");
             
             tracing::info!(target=%target, out=%out, concurrency, per_host, timing, aggressive, deep, retries, timeout, anon, full_speed, bypass_waf, browser, "Starting scan");
             
