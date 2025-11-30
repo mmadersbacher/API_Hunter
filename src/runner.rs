@@ -539,7 +539,7 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
         println!("[*] Vulnerability scanning...");
         
         let analysis_timeout = tokio::time::Duration::from_secs(120);
-        match tokio::time::timeout(analysis_timeout, run_deep_analysis(&client, &results, scan_admin, aggressive, &out_dir)).await {
+        match tokio::time::timeout(analysis_timeout, run_deep_analysis(&client, &results, scan_admin, aggressive, &out_dir, &domain)).await {
             Ok(Ok(())) => {
                 // Silently completed
             }
@@ -873,6 +873,7 @@ async fn run_deep_analysis(
     scan_admin: bool,
     aggressive: bool,
     out_dir: &PathBuf,
+    domain: &str,
 ) -> anyhow::Result<()> {
     use api_hunter::analyze::api_analyzer::ApiAnalysis;
     use api_hunter::analyze::admin_scanner::{scan_admin_paths, RiskLevel};
@@ -916,46 +917,83 @@ async fn run_deep_analysis(
     write_analysis_summary(&summary_path, &all_analyses, &admin_findings, &idor_findings)?;
     tracing::info!("Wrote partial results to: {}", analysis_path.display());
     
-    // Phase 1.5: Automatic XSS testing for endpoints with potential XSS
-    tracing::info!("Phase 1.5: Checking for XSS vulnerabilities requiring deep testing...");
+    // Phase 1.5: ULTRA-FAST XSS testing - Only on target domain, no external URLs
+    tracing::info!("Phase 1.5: Fast XSS testing on target domain...");
+    
+    // Extract main target domain
+    let target_domain = if let Ok(parsed) = url::Url::parse(&format!("https://{}", domain)) {
+        parsed.host_str().map(|s| s.to_string())
+    } else {
+        Some(domain.to_string())
+    };
+    
     let mut xss_test_count = 0;
     let mut xss_findings = Vec::new();
     
-    for analysis in &all_analyses {
-        // Check if this endpoint has XSS-related findings
-        let has_xss_indicator = analysis.findings.iter().any(|f| 
-            f.contains("Missing CSP - vulnerable to XSS") ||
-            f.contains("XSS") ||
-            f.contains("reflected")
-        );
-        
-        if has_xss_indicator && xss_test_count < 10 {
-            tracing::info!("🔬 Running advanced XSS tests on: {}", analysis.url);
-            println!("   🔬 Auto-testing XSS on: {}", analysis.url);
+    // Only test endpoints on the main target domain (no Google, CDNs, etc.)
+    let mut target_urls: Vec<String> = all_analyses.iter()
+        .filter_map(|analysis| {
+            // Check if endpoint has XSS indicators
+            let has_xss_indicator = analysis.findings.iter().any(|f| 
+                f.contains("Missing CSP - vulnerable to XSS") ||
+                f.contains("XSS") ||
+                f.contains("reflected")
+            );
             
-            match api_hunter::analyze::vulnerability_scanner::VulnerabilityScanner::test_xss_advanced(client, &analysis.url).await {
-                Ok(findings) => {
-                    if !findings.is_empty() {
-                        tracing::info!("✓ Found {} XSS vulnerabilities on {}", findings.len(), analysis.url);
-                        println!("      [v] Found {} exploitable XSS vectors", findings.len());
-                        xss_findings.extend(findings);
-                    } else {
-                        tracing::info!("✓ No exploitable XSS found on {}", analysis.url);
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("XSS test failed for {}: {}", analysis.url, e);
-                }
+            if !has_xss_indicator {
+                return None;
             }
             
-            xss_test_count += 1;
-            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+            // Verify URL is on target domain
+            if let Ok(parsed) = url::Url::parse(&analysis.url) {
+                if let Some(host) = parsed.host_str() {
+                    if let Some(target) = &target_domain {
+                        // Only test if domain matches exactly
+                        if host == target || host.ends_with(&format!(".{}", target)) {
+                            return Some(analysis.url.clone());
+                        }
+                    }
+                }
+            }
+            None
+        })
+        .take(5)  // Limit to 5 URLs maximum
+        .collect();
+    
+    target_urls.truncate(5);
+    
+    if !target_urls.is_empty() {
+        println!("   [*] XSS testing {} endpoints on target domain...", target_urls.len());
+    }
+    
+    for url in target_urls {
+        if xss_test_count >= 5 {
+            break;
         }
+        
+        tracing::info!("Running fast XSS test on: {}", url);
+        println!("   [>] Testing: {}", url);
+        
+        match api_hunter::analyze::vulnerability_scanner::VulnerabilityScanner::test_xss_advanced(client, &url).await {
+            Ok(findings) => {
+                if !findings.is_empty() {
+                    tracing::info!("Found {} XSS vulnerabilities on {}", findings.len(), url);
+                    println!("      [!] Found {} XSS vectors", findings.len());
+                    xss_findings.extend(findings);
+                } else {
+                    tracing::debug!("No XSS found on {}", url);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("XSS test failed for {}: {}", url, e);
+            }
+        }
+        
+        xss_test_count += 1;
     }
     
     if !xss_findings.is_empty() {
-        tracing::info!("Automatic XSS testing complete: {} vulnerabilities confirmed", xss_findings.len());
-        // Save XSS findings to separate file
+        tracing::info!("XSS testing complete: {} vulnerabilities found", xss_findings.len());
         let xss_path = out_dir.join("xss_findings.json");
         std::fs::write(&xss_path, serde_json::to_string_pretty(&xss_findings)?)?;
         println!("   [=] XSS findings saved to: {}", xss_path.display());
