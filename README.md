@@ -36,32 +36,60 @@ cd API_Hunter
 chmod +x install.sh
 ./install.sh
 
-# Verify installation
+# Verify installation (can be run from ANY directory)
 apihunter --help
 ```
+
+**The `apihunter` command works from any directory, just like `nmap`!**
 
 ### Manual Installation
 
 ```bash
+# Install dependencies first (REQUIRED)
+# Kali/Debian/Ubuntu:
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config libssl-dev curl
+
+# Fedora/RHEL:
+sudo dnf install -y gcc openssl-devel pkg-config curl
+
+# Arch Linux:
+sudo pacman -S base-devel openssl pkg-config curl
+
 # Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
 
 # Build from source
 cargo build --release
 
-# Install binary
+# Install binary (works from any directory)
 sudo cp target/release/api_hunter /usr/local/bin/apihunter
 sudo chmod +x /usr/local/bin/apihunter
+
+# Verify (try from home directory)
+cd ~
+apihunter --help
 ```
 
-### Kali Linux
+### Kali Linux (Detailed)
 
 ```bash
-# Install dependencies
+# Update system
 sudo apt-get update
-sudo apt-get install -y build-essential pkg-config libssl-dev tor chromium-driver
 
-# Follow quick install steps above
+# Install ALL dependencies
+sudo apt-get install -y build-essential pkg-config libssl-dev curl tor chromium-driver
+
+# Clone and install
+git clone https://github.com/mmadersbacher/API_Hunter.git
+cd API_Hunter
+chmod +x install.sh
+./install.sh
+
+# Test from any directory
+cd /tmp
+apihunter scan https://example.com -T3
 ```
 
 ## Usage
@@ -303,10 +331,77 @@ apihunter scan https://client.com \
 ## Requirements
 
 - **Rust** 1.70+ (installed automatically by install.sh)
-- **OpenSSL** (libssl-dev on Debian/Ubuntu)
-- **pkg-config**
+- **OpenSSL** development files (libssl-dev on Debian/Ubuntu) - **REQUIRED**
+- **pkg-config** - **REQUIRED**
+- **build-essential** (gcc, make, etc.) - **REQUIRED**
 - **Optional**: Tor (for --anonymous mode)
 - **Optional**: ChromeDriver (for --browser mode)
+
+## Troubleshooting
+
+### Error: "Could not find directory of OpenSSL installation"
+
+**Solution:**
+```bash
+# Kali/Debian/Ubuntu:
+sudo apt-get install -y libssl-dev pkg-config build-essential
+
+# Fedora/RHEL:
+sudo dnf install -y openssl-devel pkg-config gcc
+
+# Arch Linux:
+sudo pacman -S openssl pkg-config base-devel
+
+# Then rebuild:
+cd ~/API_Hunter
+cargo clean
+cargo build --release
+sudo cp target/release/api_hunter /usr/local/bin/apihunter
+```
+
+### Error: "apihunter: command not found"
+
+**Solution 1 - PATH issue:**
+```bash
+# Check if binary exists
+ls -la /usr/local/bin/apihunter
+
+# If it exists, add to PATH:
+export PATH="/usr/local/bin:$PATH"
+
+# Make it permanent:
+echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+**Solution 2 - Reinstall:**
+```bash
+cd ~/API_Hunter
+sudo cp target/release/api_hunter /usr/local/bin/apihunter
+sudo chmod +x /usr/local/bin/apihunter
+```
+
+### Error: "cargo: command not found" after installing Rust
+
+**Solution:**
+```bash
+# Source Rust environment
+source $HOME/.cargo/env
+
+# Or restart your terminal
+```
+
+### Build takes forever or fails
+
+**Solution:**
+```bash
+# Try with more verbose output
+RUST_BACKTRACE=1 cargo build --release
+
+# Or try clean build
+cargo clean
+cargo build --release
+```
 
 ## Documentation
 

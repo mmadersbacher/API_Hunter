@@ -14,14 +14,53 @@ if [ "$EUID" -eq 0 ]; then
     exit 1
 fi
 
+# Install system dependencies first
+echo "[*] Installing system dependencies..."
+if [ -f /etc/debian_version ]; then
+    # Debian/Ubuntu/Kali
+    echo "[*] Detected Debian-based system (Kali/Ubuntu/Debian)"
+    sudo apt-get update
+    sudo apt-get install -y build-essential pkg-config libssl-dev curl
+    echo "[v] Dependencies installed"
+elif [ -f /etc/redhat-release ]; then
+    # RHEL/CentOS/Fedora
+    echo "[*] Detected RedHat-based system"
+    sudo dnf install -y gcc openssl-devel pkg-config curl
+    echo "[v] Dependencies installed"
+elif [ -f /etc/arch-release ]; then
+    # Arch Linux
+    echo "[*] Detected Arch Linux"
+    sudo pacman -S --noconfirm base-devel openssl pkg-config curl
+    echo "[v] Dependencies installed"
+else
+    echo "[!] Unknown distribution. Please install these packages manually:"
+    echo "    - build-essential (gcc, make, etc.)"
+    echo "    - pkg-config"
+    echo "    - libssl-dev (OpenSSL development files)"
+    echo "    - curl"
+    echo ""
+    read -p "Continue anyway? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
 # Check for Rust installation
 if ! command -v cargo &> /dev/null; then
+    echo ""
     echo "[*] Rust not found. Installing Rust..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     source "$HOME/.cargo/env"
     echo "[v] Rust installed successfully"
 else
+    echo ""
     echo "[v] Rust is already installed"
+fi
+
+# Source Rust environment if needed
+if [ -f "$HOME/.cargo/env" ]; then
+    source "$HOME/.cargo/env"
 fi
 
 # Check Rust version
@@ -32,6 +71,7 @@ cargo --version
 # Build the project
 echo ""
 echo "[*] Building API Hunter (release mode)..."
+echo "[*] This may take 5-10 minutes on first build..."
 cargo build --release
 
 if [ $? -ne 0 ]; then
@@ -49,6 +89,12 @@ sudo chmod +x /usr/local/bin/apihunter
 
 echo "[v] Binary installed to /usr/local/bin/apihunter"
 
+# Add to PATH if not already there (for current session)
+if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
+    export PATH="/usr/local/bin:$PATH"
+    echo "[*] Added /usr/local/bin to PATH for current session"
+fi
+
 # Verify installation
 echo ""
 echo "[*] Verifying installation..."
@@ -59,6 +105,8 @@ if command -v apihunter &> /dev/null; then
     echo "  API Hunter is now installed and ready to use!"
     echo "======================================================================"
     echo ""
+    echo "You can now use 'apihunter' from any directory:"
+    echo ""
     echo "Usage:"
     echo "  apihunter scan <target> [options]"
     echo ""
@@ -68,8 +116,14 @@ if command -v apihunter &> /dev/null; then
     echo ""
     echo "For more information, run: apihunter --help"
     echo ""
+    echo "Note: If 'apihunter' command is not found, try:"
+    echo "  - Close and reopen your terminal"
+    echo "  - Or run: export PATH=\"/usr/local/bin:\$PATH\""
+    echo ""
 else
     echo "[!] Installation verification failed"
+    echo "[!] /usr/local/bin may not be in your PATH"
+    echo "[!] Try: export PATH=\"/usr/local/bin:\$PATH\""
     exit 1
 fi
 
