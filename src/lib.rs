@@ -16,6 +16,8 @@ pub mod anonymizer;
 pub mod waf;
 pub mod test_endpoint;
 pub mod security;
+pub mod graphql;
+pub mod auth;
 
 // re-export modules used in tests
 pub use crate::enrich::*;

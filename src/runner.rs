@@ -903,6 +903,7 @@ async fn run_deep_analysis(
     use api_hunter::analyze::admin_scanner::{scan_admin_paths, RiskLevel};
     use api_hunter::fuzz::idor_tester::{test_idor_advanced, IdorRiskLevel};
     use api_hunter::fuzz::param_discovery::extract_params_from_url;
+    use api_hunter::http_client::HttpClient;
     
     let analysis_path = out_dir.join("analysis_results.json");
     let summary_path = out_dir.join("analysis_summary.txt");
@@ -911,8 +912,161 @@ async fn run_deep_analysis(
     let mut admin_findings = Vec::new();
     let mut idor_findings = Vec::new();
     
-    // Phase 1: Analyze each API endpoint IN PARALLEL
-    tracing::info!("Phase 1: Analyzing {} API endpoints in parallel...", results.len());
+    // === PHASE 1: NEW API SECURITY FEATURES ===
+    let http_client = HttpClient::new(client.clone());
+    
+    // Phase 1.1: GraphQL Discovery & Testing
+    println!("   [*] GraphQL discovery & testing...");
+    tracing::info!("Phase 1.1: GraphQL endpoint discovery and security testing");
+    
+    let graphql_tester = api_hunter::graphql::GraphQLTester::new(http_client.clone());
+    let graphql_endpoints = graphql_tester.discover_endpoints(&format!("https://{}", domain)).await;
+    
+    if !graphql_endpoints.is_empty() {
+        println!("      [+] Found {} GraphQL endpoints", graphql_endpoints.len());
+        let mut all_graphql_results = Vec::new();
+        
+        for endpoint in &graphql_endpoints {
+            match graphql_tester.test_endpoint(endpoint).await {
+                Ok(result) => {
+                    if result.has_introspection {
+                        println!("         [!] {} has introspection enabled", endpoint);
+                    }
+                    if !result.vulnerabilities.is_empty() {
+                        println!("         [!] {} GraphQL vulnerabilities on {}", result.vulnerabilities.len(), endpoint);
+                    }
+                    all_graphql_results.push(result);
+                }
+                Err(e) => {
+                    tracing::warn!("GraphQL testing failed for {}: {}", endpoint, e);
+                }
+            }
+        }
+        
+        if !all_graphql_results.is_empty() {
+            let graphql_path = out_dir.join("graphql_findings.json");
+            std::fs::write(&graphql_path, serde_json::to_string_pretty(&all_graphql_results)?)?;
+            tracing::info!("GraphQL findings saved to: {}", graphql_path.display());
+        }
+    } else {
+        println!("      [-] No GraphQL endpoints found");
+    }
+    
+    // Phase 1.2: API Authentication Testing
+    println!("   [*] API authentication testing...");
+    tracing::info!("Phase 1.2: Authentication & authorization security testing");
+    
+    let auth_tester = api_hunter::auth::AuthTester::new(http_client.clone());
+    let mut auth_results = Vec::new();
+    
+    // Test main target and first few discovered APIs
+    let test_urls: Vec<String> = std::iter::once(format!("https://{}", domain))
+        .chain(results.iter().take(10).map(|r| r.orig_url.clone()))
+        .collect();
+    
+    for url in &test_urls {
+        match auth_tester.test_endpoint(url).await {
+            Ok(result) => {
+                if !result.auth_methods.is_empty() {
+                    println!("      [+] {} auth methods on {}", result.auth_methods.len(), url);
+                }
+                if !result.vulnerabilities.is_empty() {
+                    println!("      [!] {} auth vulnerabilities on {}", result.vulnerabilities.len(), url);
+                }
+                auth_results.push(result);
+            }
+            Err(e) => {
+                tracing::warn!("Auth testing failed for {}: {}", url, e);
+            }
+        }
+    }
+    
+    if !auth_results.is_empty() {
+        let auth_path = out_dir.join("auth_findings.json");
+        std::fs::write(&auth_path, serde_json::to_string_pretty(&auth_results)?)?;
+        tracing::info!("Auth findings saved to: {}", auth_path.display());
+    }
+    
+    // Phase 1.3: API Versioning Detection
+    println!("   [*] API version enumeration...");
+    tracing::info!("Phase 1.3: API version discovery and vulnerability detection");
+    
+    let version_detector = api_hunter::discover::versioning::VersionDetector::new(http_client.clone());
+    
+    match version_detector.discover_versions(&format!("https://{}", domain)).await {
+        Ok(version_result) => {
+            if !version_result.versions.is_empty() {
+                println!("      [+] Found {} API versions", version_result.versions.len());
+                for version in &version_result.versions {
+                    if version.is_deprecated {
+                        println!("         [!] Version {} is deprecated but accessible", version.version);
+                    } else {
+                        println!("         [+] Version {} ({})", version.version, version.url);
+                    }
+                }
+                
+                if !version_result.vulnerabilities.is_empty() {
+                    println!("      [!] {} version-specific vulnerabilities", version_result.vulnerabilities.len());
+                }
+                
+                let version_path = out_dir.join("version_findings.json");
+                std::fs::write(&version_path, serde_json::to_string_pretty(&version_result)?)?;
+                tracing::info!("Version findings saved to: {}", version_path.display());
+            } else {
+                println!("      [-] No API versions detected");
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Version detection failed: {}", e);
+        }
+    }
+    
+    // Phase 1.4: Mass Assignment Testing
+    println!("   [*] Mass assignment testing...");
+    tracing::info!("Phase 1.4: Mass assignment and hidden parameter discovery");
+    
+    let mass_assignment_tester = api_hunter::fuzz::mass_assignment::MassAssignmentTester::new(http_client.clone());
+    let mut mass_assignment_results = Vec::new();
+    
+    // Test POST/PUT endpoints
+    let post_endpoints: Vec<String> = results.iter()
+        .filter(|r| {
+            let url_lower = r.orig_url.to_lowercase();
+            url_lower.contains("/api") || url_lower.contains("/user") || 
+            url_lower.contains("/account") || url_lower.contains("/profile")
+        })
+        .take(15)
+        .map(|r| r.orig_url.clone())
+        .collect();
+    
+    for url in &post_endpoints {
+        for method in &["POST", "PUT", "PATCH"] {
+            match mass_assignment_tester.test_endpoint(url, method).await {
+                Ok(result) => {
+                    if !result.vulnerabilities.is_empty() {
+                        println!("      [!] {} {} mass assignment vulns on {}", result.vulnerabilities.len(), method, url);
+                        mass_assignment_results.push(result);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Mass assignment test failed for {} {}: {}", method, url, e);
+                }
+            }
+        }
+    }
+    
+    if !mass_assignment_results.is_empty() {
+        let mass_assignment_path = out_dir.join("mass_assignment_findings.json");
+        std::fs::write(&mass_assignment_path, serde_json::to_string_pretty(&mass_assignment_results)?)?;
+        tracing::info!("Mass assignment findings saved to: {}", mass_assignment_path.display());
+    } else {
+        println!("      [-] No mass assignment vulnerabilities found");
+    }
+    
+    // === END PHASE 1 ===
+    
+    // Phase 2: Analyze each API endpoint IN PARALLEL
+    tracing::info!("Phase 2: Analyzing {} API endpoints in parallel...", results.len());
     
     // Process in parallel batches for maximum speed
     use futures::stream::{self, StreamExt};
@@ -955,8 +1109,8 @@ async fn run_deep_analysis(
     write_analysis_summary(&summary_path, &all_analyses, &admin_findings, &idor_findings)?;
     tracing::info!("Wrote partial results to: {}", analysis_path.display());
     
-    // Phase 1.5: ULTRA-FAST PARALLEL XSS testing - Only on target domain
-    tracing::info!("Phase 1.5: Fast parallel XSS testing on target domain...");
+    // Phase 2.5: ULTRA-FAST PARALLEL XSS testing - Only on target domain
+    tracing::info!("Phase 2.5: Fast parallel XSS testing on target domain...");
     
     // Extract main target domain
     let target_domain = if let Ok(parsed) = url::Url::parse(&format!("https://{}", domain)) {
@@ -1039,9 +1193,9 @@ async fn run_deep_analysis(
     }
 
     
-    // Phase 2: Admin endpoint scanning IN PARALLEL (if enabled)
+    // Phase 3: Admin endpoint scanning IN PARALLEL (if enabled)
     if scan_admin {
-        tracing::info!("Phase 2: Scanning for admin/debug endpoints in parallel...");
+        tracing::info!("Phase 3: Scanning for admin/debug endpoints in parallel...");
         
         // Extract base URLs from results
         let mut base_urls = std::collections::HashSet::new();
@@ -1093,9 +1247,9 @@ async fn run_deep_analysis(
         write_analysis_summary(&summary_path, &all_analyses, &admin_findings, &idor_findings)?;
     }
     
-    // Phase 3: Advanced IDOR testing (if enabled via aggressive mode)
+    // Phase 4: Advanced IDOR testing (if enabled via aggressive mode)
     if aggressive {
-        tracing::info!("Phase 3: Advanced IDOR testing...");
+        tracing::info!("Phase 4: Advanced IDOR testing...");
         let max_idor_tests = 30;
         
         for (idx, event) in results.iter().take(max_idor_tests).enumerate() {

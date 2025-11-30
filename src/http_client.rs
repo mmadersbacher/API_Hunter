@@ -1,6 +1,9 @@
-use reqwest::{Client, ClientBuilder};
+use reqwest::{Client, ClientBuilder, Response};
 use std::time::Duration;
+use std::collections::HashMap;
 use once_cell::sync::Lazy;
+use serde::Serialize;
+use anyhow::Result;
 
 /// High-performance HTTP client with all optimizations enabled
 pub static OPTIMIZED_CLIENT: Lazy<Client> = Lazy::new(|| {
@@ -59,6 +62,58 @@ pub fn create_stealth_client() -> Client {
         .danger_accept_invalid_certs(true)
         .build()
         .expect("Failed to build stealth client")
+}
+
+/// HTTP Client wrapper with convenience methods
+#[derive(Clone)]
+pub struct HttpClient {
+    client: Client,
+}
+
+impl HttpClient {
+    pub fn new(client: Client) -> Self {
+        Self { client }
+    }
+
+    pub fn from_optimized() -> Self {
+        Self {
+            client: OPTIMIZED_CLIENT.clone(),
+        }
+    }
+
+    /// GET request
+    pub async fn get(&self, url: &str) -> Result<Response> {
+        Ok(self.client.get(url).send().await?)
+    }
+
+    /// GET request with custom headers
+    pub async fn get_with_headers(&self, url: &str, headers: &HashMap<String, String>) -> Result<Response> {
+        let mut req = self.client.get(url);
+        for (key, value) in headers {
+            req = req.header(key, value);
+        }
+        Ok(req.send().await?)
+    }
+
+    /// POST JSON request
+    pub async fn post_json<T: Serialize>(&self, url: &str, json: &T) -> Result<Response> {
+        Ok(self.client.post(url).json(json).send().await?)
+    }
+
+    /// PUT JSON request
+    pub async fn put_json<T: Serialize>(&self, url: &str, json: &T) -> Result<Response> {
+        Ok(self.client.put(url).json(json).send().await?)
+    }
+
+    /// PATCH JSON request
+    pub async fn patch_json<T: Serialize>(&self, url: &str, json: &T) -> Result<Response> {
+        Ok(self.client.patch(url).json(json).send().await?)
+    }
+
+    /// POST with form data
+    pub async fn post_form(&self, url: &str, form: &HashMap<String, String>) -> Result<Response> {
+        Ok(self.client.post(url).form(form).send().await?)
+    }
 }
 
 #[cfg(test)]
