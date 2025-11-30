@@ -887,23 +887,37 @@ async fn run_deep_analysis(
     let mut admin_findings = Vec::new();
     let mut idor_findings = Vec::new();
     
-    // Phase 1: Analyze each API endpoint
-    tracing::info!("Phase 1: Analyzing {} API endpoints...", results.len());
-    for (idx, event) in results.iter().enumerate() {
-        tracing::debug!("Analyzing {}/{}: {}", idx + 1, results.len(), event.orig_url);
-        
-        match ApiAnalysis::analyze(client, &event.orig_url).await {
-            Ok(analysis) => {
-                tracing::info!("Analyzed {}: {} findings", event.orig_url, analysis.findings.len());
-                all_analyses.push(analysis);
+    // Phase 1: Analyze each API endpoint IN PARALLEL
+    tracing::info!("Phase 1: Analyzing {} API endpoints in parallel...", results.len());
+    
+    // Process in parallel batches for maximum speed
+    use futures::stream::{self, StreamExt};
+    let analysis_stream = stream::iter(results.iter().enumerate())
+        .map(|(idx, event)| {
+            let client = client.clone();
+            let url = event.orig_url.clone();
+            let total = results.len();
+            async move {
+                tracing::debug!("Analyzing {}/{}: {}", idx + 1, total, url);
+                match ApiAnalysis::analyze(&client, &url).await {
+                    Ok(analysis) => {
+                        tracing::info!("Analyzed {}: {} findings", url, analysis.findings.len());
+                        Some(analysis)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to analyze {}: {}", url, e);
+                        None
+                    }
+                }
             }
-            Err(e) => {
-                tracing::warn!("Failed to analyze {}: {}", event.orig_url, e);
-            }
+        })
+        .buffer_unordered(20);  // 20 parallel analysis tasks
+    
+    futures::pin_mut!(analysis_stream);
+    while let Some(opt) = analysis_stream.next().await {
+        if let Some(analysis) = opt {
+            all_analyses.push(analysis);
         }
-        
-        // Small delay between analyses
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
     
     // Write API analysis results immediately (in case later phases timeout)
@@ -917,8 +931,8 @@ async fn run_deep_analysis(
     write_analysis_summary(&summary_path, &all_analyses, &admin_findings, &idor_findings)?;
     tracing::info!("Wrote partial results to: {}", analysis_path.display());
     
-    // Phase 1.5: ULTRA-FAST XSS testing - Only on target domain, no external URLs
-    tracing::info!("Phase 1.5: Fast XSS testing on target domain...");
+    // Phase 1.5: ULTRA-FAST PARALLEL XSS testing - Only on target domain
+    tracing::info!("Phase 1.5: Fast parallel XSS testing on target domain...");
     
     // Extract main target domain
     let target_domain = if let Ok(parsed) = url::Url::parse(&format!("https://{}", domain)) {
@@ -927,11 +941,8 @@ async fn run_deep_analysis(
         Some(domain.to_string())
     };
     
-    let mut xss_test_count = 0;
-    let mut xss_findings = Vec::new();
-    
     // Only test endpoints on the main target domain (no Google, CDNs, etc.)
-    let mut target_urls: Vec<String> = all_analyses.iter()
+    let target_urls: Vec<String> = all_analyses.iter()
         .filter_map(|analysis| {
             // Check if endpoint has XSS indicators
             let has_xss_indicator = analysis.findings.iter().any(|f| 
@@ -960,49 +971,53 @@ async fn run_deep_analysis(
         .take(5)  // Limit to 5 URLs maximum
         .collect();
     
-    target_urls.truncate(5);
-    
     if !target_urls.is_empty() {
-        println!("   [*] XSS testing {} endpoints on target domain...", target_urls.len());
-    }
-    
-    for url in target_urls {
-        if xss_test_count >= 5 {
-            break;
-        }
+        println!("   [*] XSS testing {} endpoints in parallel...", target_urls.len());
         
-        tracing::info!("Running fast XSS test on: {}", url);
-        println!("   [>] Testing: {}", url);
-        
-        match api_hunter::analyze::vulnerability_scanner::VulnerabilityScanner::test_xss_advanced(client, &url).await {
-            Ok(findings) => {
-                if !findings.is_empty() {
-                    tracing::info!("Found {} XSS vulnerabilities on {}", findings.len(), url);
-                    println!("      [!] Found {} XSS vectors", findings.len());
-                    xss_findings.extend(findings);
-                } else {
-                    tracing::debug!("No XSS found on {}", url);
+        // Run ALL XSS tests in parallel for maximum speed
+        let xss_tasks: Vec<_> = target_urls.iter().map(|url| {
+            let client = client.clone();
+            let url = url.clone();
+            tokio::spawn(async move {
+                tracing::info!("Running fast XSS test on: {}", url);
+                match api_hunter::analyze::vulnerability_scanner::VulnerabilityScanner::test_xss_advanced(&client, &url).await {
+                    Ok(findings) => {
+                        if !findings.is_empty() {
+                            tracing::info!("Found {} XSS vulnerabilities on {}", findings.len(), url);
+                            Some((url, findings))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("XSS test failed for {}: {}", url, e);
+                        None
+                    }
                 }
-            }
-            Err(e) => {
-                tracing::warn!("XSS test failed for {}: {}", url, e);
+            })
+        }).collect();
+        
+        // Collect results
+        let mut xss_findings = Vec::new();
+        for task in xss_tasks {
+            if let Ok(Some((url, findings))) = task.await {
+                println!("   [!] {} XSS vectors on {}", findings.len(), url);
+                xss_findings.extend(findings);
             }
         }
         
-        xss_test_count += 1;
-    }
-    
-    if !xss_findings.is_empty() {
-        tracing::info!("XSS testing complete: {} vulnerabilities found", xss_findings.len());
-        let xss_path = out_dir.join("xss_findings.json");
-        std::fs::write(&xss_path, serde_json::to_string_pretty(&xss_findings)?)?;
-        println!("   [=] XSS findings saved to: {}", xss_path.display());
+        if !xss_findings.is_empty() {
+            tracing::info!("XSS testing complete: {} vulnerabilities found", xss_findings.len());
+            let xss_path = out_dir.join("xss_findings.json");
+            std::fs::write(&xss_path, serde_json::to_string_pretty(&xss_findings)?)?;
+            println!("   [=] XSS findings saved to: {}", xss_path.display());
+        }
     }
 
     
-    // Phase 2: Admin endpoint scanning (if enabled)
+    // Phase 2: Admin endpoint scanning IN PARALLEL (if enabled)
     if scan_admin {
-        tracing::info!("Phase 2: Scanning for admin/debug endpoints...");
+        tracing::info!("Phase 2: Scanning for admin/debug endpoints in parallel...");
         
         // Extract base URLs from results
         let mut base_urls = std::collections::HashSet::new();
@@ -1016,18 +1031,30 @@ async fn run_deep_analysis(
             }
         }
         
-        for base_url in base_urls {
-            tracing::info!("Scanning admin paths on: {}", base_url);
-            match scan_admin_paths(client, &base_url).await {
-                Ok(findings) => {
-                    let critical_count = findings.iter().filter(|f| matches!(f.risk_level, RiskLevel::Critical)).count();
-                    let high_count = findings.iter().filter(|f| matches!(f.risk_level, RiskLevel::High)).count();
-                    tracing::info!("Found {} admin endpoints ({} critical, {} high)", findings.len(), critical_count, high_count);
-                    admin_findings.extend(findings);
+        // Run admin scans in parallel
+        let admin_tasks: Vec<_> = base_urls.into_iter().map(|base_url| {
+            let client = client.clone();
+            tokio::spawn(async move {
+                tracing::info!("Scanning admin paths on: {}", base_url);
+                match scan_admin_paths(&client, &base_url).await {
+                    Ok(findings) => {
+                        let critical_count = findings.iter().filter(|f| matches!(f.risk_level, RiskLevel::Critical)).count();
+                        let high_count = findings.iter().filter(|f| matches!(f.risk_level, RiskLevel::High)).count();
+                        tracing::info!("Found {} admin endpoints ({} critical, {} high)", findings.len(), critical_count, high_count);
+                        Some(findings)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Admin scan failed for {}: {}", base_url, e);
+                        None
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("Admin scan failed for {}: {}", base_url, e);
-                }
+            })
+        }).collect();
+        
+        // Collect admin findings
+        for task in admin_tasks {
+            if let Ok(Some(findings)) = task.await {
+                admin_findings.extend(findings);
             }
         }
         
