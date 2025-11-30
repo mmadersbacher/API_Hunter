@@ -92,6 +92,53 @@ cd /tmp
 apihunter scan https://example.com -T3
 ```
 
+## Update to Latest Version
+
+### Quick Update (Recommended)
+
+```bash
+# Navigate to your API_Hunter directory
+cd API_Hunter
+
+# Run update script
+chmod +x update.sh
+./update.sh
+```
+
+### Manual Update
+
+```bash
+# Navigate to your API_Hunter directory
+cd API_Hunter
+
+# Pull latest changes
+git pull origin master
+
+# Rebuild and reinstall
+cargo build --release
+sudo cp target/release/api_hunter /usr/local/bin/apihunter
+
+# Verify new version
+apihunter --version
+```
+
+### Alternative: Fresh Install
+
+```bash
+# Remove old installation
+sudo rm /usr/local/bin/apihunter
+
+# Remove old directory
+cd ~
+rm -rf API_Hunter
+
+# Clone and install fresh
+git clone https://github.com/mmadersbacher/API_Hunter.git
+cd API_Hunter
+chmod +x install.sh
+./install.sh
+```
+
 ## Usage
 
 ### Basic Scan
