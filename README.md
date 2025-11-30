@@ -14,14 +14,48 @@ A comprehensive API security scanner and reconnaissance tool for bug bounty hunt
 
 ## Features
 
+### Core API Security Features
+
 - `[*]` **API Discovery** - Subdomain enumeration, API endpoint discovery, JavaScript analysis
 - `[>]` **Active Probing** - Smart HTTP probing with rate limiting and WAF detection
 - `[!]` **Vulnerability Scanning** - Automatic XSS, SQLi, IDOR, SSRF, and more
 - `[DIR]` **Deep JS Analysis** - Extract API endpoints, secrets, tokens, parameters from JS files
-- `[+]` **Advanced Testing** - Automatic XSS testing with 24+ payloads when vulnerabilities detected
 - `[=]` **Structured Reports** - Clean CLI output + detailed JSON/TXT reports
 - `[~]` **Anonymity** - Tor integration and residential proxy support
 - `[#]` **WAF Bypass** - Intelligent WAF detection and bypass techniques
+
+### Phase 1 - Advanced API Security (NEW!)
+
+- `[GQL]` **GraphQL Security Testing**
+  - Automatic GraphQL endpoint discovery
+  - Introspection query analysis
+  - Schema extraction and parsing
+  - Mutation testing for unauthorized access
+  - GraphQL-specific vulnerabilities (batch attacks, circular queries, field duplication)
+  - Alias overload and directive abuse detection
+
+- `[AUTH]` **API Authentication Analysis**
+  - Multi-method auth detection (Bearer, Basic, OAuth, API Keys, JWT)
+  - API key vulnerability testing (weak validation, insecure placement)
+  - JWT security analysis (None algorithm, weak secrets, expired tokens)
+  - OAuth token testing (query parameter exposure, token revocation)
+  - Basic Auth brute-force with common credentials
+  - Session security (HTTPOnly, Secure, SameSite flags, session fixation)
+
+- `[VER]` **API Versioning Detection**
+  - Automatic version enumeration (v1, v2, v3, v4, 1.0, 2.0, etc.)
+  - Multiple version pattern testing (path, query, subdomain)
+  - Deprecated version identification
+  - Version downgrade attack detection
+  - Version-specific vulnerability analysis
+
+- `[MASS]` **Mass Assignment Testing**
+  - Privilege escalation parameter discovery (admin, role, permissions)
+  - Hidden field injection (id, timestamps, status fields)
+  - Role manipulation testing
+  - ID manipulation and object hijacking
+  - Status bypass testing (approval, payment, verification)
+  - Automatic parameter pollution detection
 
 ## Installation
 
@@ -147,10 +181,17 @@ chmod +x install.sh
 apihunter scan https://example.com --sV -T3
 ```
 
-### Deep Security Audit
+### Deep Security Audit (with Phase 1 features)
 
 ```bash
+# Comprehensive API security testing with all Phase 1 features
 apihunter scan https://example.com --deep-js --sV --sA -T3 --report findings.txt
+
+# This automatically includes:
+# - GraphQL discovery and introspection testing
+# - API authentication vulnerability analysis  
+# - Version enumeration and downgrade testing
+# - Mass assignment parameter discovery
 ```
 
 ### Aggressive Testing (with permission)
@@ -216,6 +257,21 @@ apihunter scan https://target.com --anonymous --sV -T2
 
 [>] Probing endpoints...
 
+[*] Phase 1 Security Testing...
+   [*] GraphQL discovery & testing...
+      [+] Found 2 GraphQL endpoints
+         [!] https://api.example.com/graphql has introspection enabled
+         [!] 3 GraphQL vulnerabilities on https://api.example.com/graphql
+   [*] API authentication testing...
+      [+] 2 auth methods on https://api.example.com
+      [!] 4 auth vulnerabilities on https://api.example.com
+   [*] API version enumeration...
+      [+] Found 3 API versions
+         [!] Version 1 is deprecated but accessible
+         [!] 2 version-specific vulnerabilities
+   [*] Mass assignment testing...
+      [!] 5 POST mass assignment vulns on https://api.example.com/users
+
 [*] Vulnerability scanning...
    [+] Auto-testing XSS on: https://example.com/search
       [v] Found 3 exploitable XSS vectors
@@ -275,6 +331,10 @@ All results are saved to `./results/`:
 | `analysis_summary.txt` | Human-readable summary |
 | `js_critical_info.json` | Deep JS analysis results |
 | `xss_findings.json` | Automatic XSS test results |
+| `graphql_findings.json` | **NEW** GraphQL security findings |
+| `auth_findings.json` | **NEW** Authentication vulnerability analysis |
+| `version_findings.json` | **NEW** API versioning and downgrade attacks |
+| `mass_assignment_findings.json` | **NEW** Mass assignment vulnerabilities |
 | `target_apis_sorted.csv` | Discovered API endpoints |
 | `subdomains.txt` | Discovered subdomains |
 
