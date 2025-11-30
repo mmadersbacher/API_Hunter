@@ -7,6 +7,18 @@ use crate::cli::{Cli, Commands};
 use api_hunter::output::{write_csv, write_top_txt, RawEvent};
 use std::time::Duration;
 
+fn print_ascii_logo() {
+    println!(r#"
+                 _    ____ ___   _   _ _   _ _   _ _____ _____ ____  
+                / \  |  _ \_ _| | | | | | | | \ | |_   _| ____|  _ \ 
+               / _ \ | |_) | |  | |_| | | | |  \| | | | |  _| | |_) |
+              / ___ \|  __/| |  |  _  | |_| | |\  | | | | |___|  _ < 
+             /_/   \_\_|  |___| |_| |_|\___/|_| \_| |_| |_____|_| \_\
+                                                                      
+                          Security Scanner v0.1.0
+    "#);
+}
+
 pub async fn run_from_cli(cli: Cli) -> anyhow::Result<()> {
     // Configure logging based on global flags.
     // Keep external crates (reqwest/hyper) at INFO to avoid flooding the CLI,
@@ -29,7 +41,7 @@ pub async fn run_from_cli(cli: Cli) -> anyhow::Result<()> {
         Commands::TestEndpoint { url, fuzz, rate_limit } => {
             return handle_test_endpoint_command(url, fuzz, rate_limit).await;
         }
-        Commands::Scan { target, out, timing, concurrency, per_host, lite, deep, aggressive, scan_vulns, scan_admin, browser, browser_wait, browser_depth, anon, full_speed, bypass_waf, subdomains, jwt, timeout, retries, resume } => {
+        Commands::Scan { target, out, timing, concurrency, per_host, lite, deep, aggressive, scan_vulns, scan_admin, browser, browser_wait, browser_depth, anon, full_speed, bypass_waf, subdomains, jwt, deep_js, timeout, retries, resume, report } => {
             // Apply timing templates (like nmap -T0 to -T5)
             let (final_concurrency, final_per_host, final_retries) = match timing {
                 0 => (1, 1, 1),      // T0: Paranoid (ultra-slow)
@@ -65,72 +77,29 @@ pub async fn run_from_cli(cli: Cli) -> anyhow::Result<()> {
             
             tracing::info!(target=%target, out=%out, concurrency, per_host, timing, aggressive, deep, retries, timeout, anon, full_speed, bypass_waf, browser, "Starting scan");
             
-            // Print scan configuration
-            println!("\n┌──────────────────────────────────────────────────┐");
-            println!("│            API Hunter v1.0 - Scan Engine         │");
-            println!("└──────────────────────────────────────────────────┘");
-            println!("\n[*] Target: {}", target);
-            println!("[*] Timing: T{} (concurrency: {}, per-host: {})", timing, concurrency, per_host);
-            println!("[*] Mode: {}", if lite { "Lite" } else if aggressive { "Aggressive" } else if deep { "Deep" } else { "Standard" });
-            
-            println!("\n[*] Test Sequence:");
-            println!("    [Phase 1] WAF Detection");
-            if subdomains {
-                println!("    [Phase 1.5] Subdomain Enumeration");
-                println!("              - Certificate Transparency (crt.sh)");
-                println!("              - DNS Bruteforce (80+ prefixes)");
+            // Print ASCII logo and scan configuration
+            print_ascii_logo();
+            println!("[>] Target: {}", target);
+            println!("[~] Timing: T{} (concurrency: {}, per-host: {})", timing, concurrency, per_host);
+            if lite {
+                println!("[·] Mode: Lite (low impact)");
+            } else if aggressive {
+                println!("[·] Mode: Aggressive");
+            } else if deep {
+                println!("[·] Mode: Deep");
             }
-            println!("    [Phase 2] API Discovery");
-            if browser {
-                println!("              - Browser-based (JavaScript execution)");
-            }
-            if with_wayback || with_gau {
-                println!("              - Historical data (Wayback, GAU)");
-            }
-            println!("              - JavaScript endpoint extraction");
-            println!("              - Pattern-based detection");
-            println!("    [Phase 3] Active Probing");
-            println!("              - HTTP fingerprinting");
-            println!("              - Security headers analysis");
-            println!("              - CORS configuration check");
-            if scan_vulns {
-                println!("    [Phase 4] Vulnerability Scanning");
-                println!("              - SQL/NoSQL Injection");
-                println!("              - XSS (Cross-Site Scripting)");
-                println!("              - SSRF, Path Traversal, RCE");
-                if jwt {
-                    println!("              - JWT Token Analysis");
-                }
-            }
-            if scan_admin {
-                println!("    [Phase 5] Admin/Debug Endpoint Discovery");
-            }
-            if aggressive {
-                println!("    [Phase 6] Aggressive Testing");
-                println!("              - Parameter fuzzing");
-                println!("              - IDOR testing");
-                println!("              - Bruteforce enumeration");
-            }
-            if bypass_waf {
-                println!("    [Phase 7] WAF Bypass Techniques");
-            }
-            if anon {
-                println!("\n[*] Anonymous Mode: Enabled");
-                if full_speed {
-                    println!("    Full-Speed: All delays disabled");
-                }
-            }
+
             println!("\n{}\n", "-".repeat(60));
             
             // WAF detection is always enabled
-            run_scan(target, out, concurrency, per_host, aggressive, with_gau, with_wayback, resume, lite, retries, timeout, scan_vulns, scan_admin, anon, full_speed, true, bypass_waf, browser, browser_wait, browser_depth, subdomains, jwt).await?;
+            run_scan(target, out, concurrency, per_host, aggressive, with_gau, with_wayback, resume, lite, retries, timeout, scan_vulns, scan_admin, anon, full_speed, true, bypass_waf, browser, browser_wait, browser_depth, subdomains, jwt, deep_js, report).await?;
         }
     }
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, aggressive: bool, with_gau: bool, with_wayback: bool, resume: Option<String>, lite: bool, retries: u8, timeout: u64, scan_vulns: bool, scan_admin: bool, anon: bool, full_speed: bool, detect_waf: bool, bypass_waf: bool, browser: bool, browser_wait: u64, browser_depth: usize, subdomains: bool, jwt: bool) -> anyhow::Result<()> {
+async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, aggressive: bool, with_gau: bool, with_wayback: bool, resume: Option<String>, lite: bool, retries: u8, timeout: u64, scan_vulns: bool, scan_admin: bool, anon: bool, full_speed: bool, _detect_waf: bool, bypass_waf: bool, browser: bool, browser_wait: u64, browser_depth: usize, subdomains: bool, jwt: bool, deep_js: bool, report: Option<String>) -> anyhow::Result<()> {
     let out_dir = PathBuf::from(&out);
     api_hunter::utils::ensure_dir(&out_dir)?;
 
@@ -169,58 +138,40 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
 
     // Setup anonymous mode if requested
     let anonymizer = if anon {
-        println!("[Phase 0] Initializing Anonymous Mode...");
-        if full_speed {
-            println!("[*] Full-Speed Mode: All delays disabled");
-        }
-        
         // Try to load from environment first
         let anon_client = if let Some(anon) = api_hunter::anonymizer::Anonymizer::from_env(full_speed) {
             anon
         } else {
-            // Fallback: Erstelle ohne Proxy (direkter Traffic mit Human-like Patterns)
+            // Fallback: Create without proxy (direct traffic with Human-like Patterns)
             api_hunter::anonymizer::Anonymizer::new(full_speed)
         };
         
         // Check if residential proxy is configured
         if !anon_client.is_proxy_configured() {
-            println!("[-] No residential proxy configured");
-            api_hunter::anonymizer::Anonymizer::print_proxy_setup_instructions();
-            println!("[*] Continuing with direct connection + human-like patterns...\n");
-        } else {
-            println!("[+] Anonymous client configured\n");
+            println!("⚠️  No residential proxy configured - using direct connection");
         }
-        
-        anon_client.print_status();
-        println!();
         
         Some(anon_client)
     } else {
         None
     };
 
-    // Phase 1: WAF Detection
-    println!("[Phase 1] WAF Detection...");
+    // Phase 1: WAF Detection (passive - during probing)
     // WAF detection happens during probing
 
     // Phase 1.5: Subdomain Enumeration (if enabled)
     let mut all_targets = vec![domain.clone()];
     if subdomains {
-        println!("\n[Phase 1.5] Subdomain Enumeration...");
+        println!("[*] Subdomain enumeration...");
         use api_hunter::discover::subdomain::SubdomainEnumerator;
         
         let enumerator = SubdomainEnumerator::new();
         let subdomain_results = enumerator.enumerate(&domain).await;
-        println!("[+] Found {} subdomains", subdomain_results.len());
         
         // Save subdomain report
         let report = enumerator.generate_report(&subdomain_results);
         let subdomain_path = out_dir.join("subdomains.txt");
-        if let Err(e) = std::fs::write(&subdomain_path, &report) {
-            eprintln!("[-] Failed to write subdomain report: {}", e);
-        } else {
-            println!("[+] Subdomain report saved to: {}", subdomain_path.display());
-        }
+        let _ = std::fs::write(&subdomain_path, &report);
         
         // Add API-related subdomains to scan targets
         for result in subdomain_results.iter() {
@@ -228,17 +179,15 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
                 || result.subdomain.contains("rest") 
                 || result.subdomain.contains("graphql") 
                 || result.subdomain.contains("gateway") {
-                println!("[+] Adding API subdomain to scan: {}", result.subdomain);
                 all_targets.push(result.subdomain.clone());
             }
         }
         
-        println!("[+] Total targets to scan: {}", all_targets.len());
+        println!("   Found: {} subdomains ({} API-related)", subdomain_results.len(), all_targets.len() - 1);
     }
 
     // Discover and gather candidates
-    println!("\n[Phase 2] API Discovery...");
-    tracing::info!("Starting discovery phase for domain: {}", domain);
+    println!("[*] API discovery...");
     let mut candidates: Vec<String> = Vec::new();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(1024);
     
@@ -278,10 +227,64 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
         Err(_) => { tracing::warn!("JS extraction timed out (12s)"); }
     }
 
+    // Deep JavaScript Analysis - Extract ALL critical information
+    if deep_js {
+        println!("   [DIR] Deep JS analysis...");
+        
+        match tokio::time::timeout(
+            Duration::from_secs(60),
+            async {
+                let analyzer = api_hunter::gather::js_deep_analyzer::JsDeepAnalyzer::new(
+                    domain.clone(),
+                    timeout,
+                    concurrency as usize,
+                )?;
+                analyzer.analyze_all().await
+            }
+        ).await {
+            Ok(Ok(js_critical)) => {
+                let secrets_warn = if js_critical.secrets.len() > 0 { " ⚠️" } else { "" };
+                println!("      Endpoints: {} | Secrets: {}{} | Parameters: {}", 
+                    js_critical.endpoints.len(),
+                    js_critical.secrets.len(),
+                    secrets_warn,
+                    js_critical.parameters.len()
+                );
+                
+                // Add discovered endpoints to candidates
+                for endpoint in &js_critical.endpoints {
+                    candidates.push(endpoint.url.clone());
+                }
+                
+                for ws in &js_critical.websockets {
+                    candidates.push(ws.clone());
+                }
+                
+                for gql in &js_critical.graphql {
+                    candidates.push(gql.endpoint.clone());
+                }
+                
+                // Save critical findings to a special output file
+                let js_critical_path = format!("{}/js_critical_info.json", out);
+                let _ = std::fs::write(&js_critical_path, serde_json::to_string_pretty(&js_critical).unwrap_or_default());
+                
+                // Only print warning for HIGH VALUE findings
+                if !js_critical.secrets.is_empty() {
+                    println!("      [!] {} secrets found! Check {}", js_critical.secrets.len(), js_critical_path);
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("Deep JS analysis failed: {}", e);
+            }
+            Err(_) => {
+                tracing::warn!("Deep JS analysis timed out");
+            }
+        }
+    }
+
     // Browser-based dynamic API discovery
     if browser {
-        println!("[*] Browser: Launching headless Chrome...");
-        tracing::info!("Starting browser-based API discovery");
+        println!("   [WWW] Browser discovery...");
         
         match tokio::time::timeout(
             Duration::from_secs(browser_wait / 1000 + 30),
@@ -295,15 +298,12 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
             Ok(Ok(browser_apis)) => {
                 let count = browser_apis.len();
                 candidates.extend(browser_apis);
-                println!("[+] Browser: {} endpoints discovered", count);
-                tracing::info!("Browser discovery: {} endpoints found", count);
+                println!("      Found: {} endpoints", count);
             }
             Ok(Err(e)) => {
-                println!("[-] Browser discovery failed: {}", e);
                 tracing::warn!("Browser discovery failed: {}", e);
             }
             Err(_) => {
-                println!("[-] Browser discovery timed out");
                 tracing::warn!("Browser discovery timed out");
             }
         }
@@ -322,34 +322,24 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
         out
     });
     
-    tracing::debug!("Waiting for external tool results (max 2s)...");
     if let Ok(mut s) = collect_task.await {
-        let ext_count = s.len();
-        if ext_count > 0 {
-            tracing::info!("External tools: {} URLs", ext_count);
-        }
         candidates.append(&mut s);
     }
 
     candidates.sort(); candidates.dedup();
     let total_discovered = candidates.len();
-    println!("[+] Discovery: {} total URLs found", total_discovered);
-    tracing::info!("Discovery complete: {} total URLs (before filtering)", total_discovered);
     
     let filtered: Vec<String> = candidates.into_iter().filter(|u| api_hunter::filter::api_patterns::is_api_candidate(u)).collect();
     let filtered_count = filtered.len();
-    println!("[+] Filtered: {} API candidates ({}% match)", filtered_count, if total_discovered > 0 { (filtered_count * 100) / total_discovered } else { 0 });
-    tracing::info!("Filtered to {} API candidates", filtered_count);
+    println!("   Found: {} URLs → {} API candidates", total_discovered, filtered_count);
 
     // Phase 3: Active Probing
-    println!("\n[Phase 3] Active Probing...");
+    println!("[>] Probing endpoints...");
     
     // Create HTTP client based on anonymous mode
     let client = if let Some(ref anon) = anonymizer {
-        println!("[*] Creating stealth client...");
         match anon.create_stealth_client(timeout) {
             Ok(client) => {
-                println!("[+] Stealth client ready\n");
                 client
             }
             Err(e) => {
@@ -539,21 +529,17 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
     let mut medium_findings = 0;
     
     if scan_vulns && success_count > 0 {
-        println!("\n[Phase 4] Vulnerability Scanning...");
-        tracing::info!("Starting vulnerability scanning phase on {} APIs...", success_count);
+        println!("[*] Vulnerability scanning...");
         
         let analysis_timeout = tokio::time::Duration::from_secs(120);
         match tokio::time::timeout(analysis_timeout, run_deep_analysis(&client, &results, scan_admin, aggressive, &out_dir)).await {
             Ok(Ok(())) => {
-                println!("[+] Vulnerability scan completed");
-                tracing::info!("Vulnerability scan completed successfully");
+                // Silently completed
             }
             Ok(Err(e)) => {
-                println!("[-] Vulnerability scan failed: {}", e);
                 tracing::warn!("Vulnerability scan failed: {}", e);
             }
             Err(_) => {
-                println!("[-] Vulnerability scan timed out (120s)");
                 tracing::warn!("Vulnerability scan timed out after 120s");
             }
         };
@@ -570,45 +556,29 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
                 }
             }
         }
+        
+        // Display severity counts with proper markers
+        println!("   Findings: {} [!] {} [!!] {} [i]", critical_findings, high_findings, medium_findings);
     }
 
     // Phase 5: Admin/Debug Endpoint Discovery
     if scan_admin && success_count > 0 {
-        println!("\n[Phase 5] Admin/Debug Endpoint Scanning...");
-        tracing::info!("Scanning for admin endpoints on {} APIs...", success_count);
-        // Admin scanning is handled in run_deep_analysis
+        // Admin scanning is handled in run_deep_analysis - no additional output
     }
 
     // Phase 6: Aggressive Testing (Parameter Fuzzing, IDOR)
     if aggressive && success_count > 0 {
-        println!("\n[Phase 6] Aggressive Testing...");
-        tracing::info!("Starting aggressive testing phase on {} APIs...", success_count);
+        println!("[~] Aggressive testing...");
         
         // Set a longer timeout for intensive fuzzing
         let fuzz_timeout = tokio::time::Duration::from_secs(60);
-        match tokio::time::timeout(fuzz_timeout, run_param_fuzzing(&client, &results, true, &out_dir)).await {
-            Ok(Ok(())) => {
-                println!("[+] Aggressive testing completed");
-                tracing::info!("Aggressive testing completed successfully");
-            }
-            Ok(Err(e)) => {
-                println!("[-] Aggressive testing failed: {}", e);
-                tracing::warn!("Aggressive testing failed: {}", e);
-            }
-            Err(_) => {
-                println!("[-] Aggressive testing timed out (60s)");
-                tracing::warn!("Aggressive testing timed out after 60s");
-            }
-        };
+        let _ = tokio::time::timeout(fuzz_timeout, run_param_fuzzing(&client, &results, true, &out_dir)).await;
     }
 
     // Phase 7: WAF Bypass Techniques
     if bypass_waf && success_count > 0 {
-        println!("\n[Phase 7] WAF Bypass Testing...");
-        println!("[*] Testing bypass techniques on {} APIs...", success_count);
-        tracing::info!("Testing WAF bypass techniques");
+        println!("[#] WAF bypass testing...");
         // WAF bypass techniques would be implemented here
-        println!("[+] WAF bypass testing completed");
     }
 
     // Print scan summary
@@ -634,65 +604,81 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
     if jwt {
         let jwt_analysis_results = jwt_results.lock();
         if !jwt_analysis_results.is_empty() {
-            println!("\n[*] JWT Token Analysis:");
-            println!("    [+] {} JWT token(s) found", jwt_analysis_results.len());
-            
-            let mut vuln_count = 0;
-            for result in jwt_analysis_results.iter() {
-                vuln_count += result.vulnerabilities.len();
-            }
+            let vuln_count: usize = jwt_analysis_results.iter().map(|r| r.vulnerabilities.len()).sum();
             
             if vuln_count > 0 {
-                println!("    [!] {} JWT vulnerabilities detected", vuln_count);
+                println!("   [KEY] JWT: {} tokens analyzed, {} issues found", jwt_analysis_results.len(), vuln_count);
                 
                 // Save JWT report
                 if let Some(ref analyzer) = jwt_analyzer {
                     let report = analyzer.generate_report(&jwt_analysis_results);
-                    let jwt_path = out_dir.join("jwt_analysis.txt");
-                    if let Err(e) = std::fs::write(&jwt_path, &report) {
-                        eprintln!("    [-] Failed to write JWT report: {}", e);
-                    } else {
-                        println!("    [+] JWT report saved to: jwt_analysis.txt");
-                    }
+                    let _ = std::fs::write(out_dir.join("jwt_analysis.txt"), &report);
                 }
-            } else {
-                println!("    [+] No JWT vulnerabilities detected");
             }
         }
     }
     
-    // Status code summary
-    let mut status_counts: std::collections::HashMap<u16, usize> = std::collections::HashMap::new();
-    for ev in &results {
-        *status_counts.entry(ev.status).or_insert(0) += 1;
-    }
-    println!("\n[*] Status Codes:");
-    let mut statuses: Vec<_> = status_counts.iter().collect();
-    statuses.sort_by(|a, b| b.1.cmp(a.1));
-    for (status, count) in statuses.iter().take(5) {
-        println!("    [-] {}: {} endpoint(s)", status, count);
-    }
-    
-    println!("\n[*] Output Location: {}", out_dir.display());
-    
-    // Print enhanced statistics
+    // Print clean final summary
     let scan_duration = scan_start.elapsed().as_secs();
-    if let Err(e) = print_final_statistics(&out, critical_findings, high_findings, medium_findings, scan_duration).await {
-        eprintln!("[!] Failed to print statistics: {}", e);
+    println!("\n{}", "=".repeat(60));
+    println!("              SCAN COMPLETE");
+    println!("{}", "=".repeat(60));
+    println!("\n[*] Summary:");
+    println!("   Target: {}", domain);
+    println!("   Duration: {}s", scan_duration);
+    println!("   Endpoints: {}", success_count);
+    
+    println!("\n[*] Security Findings:");
+    if critical_findings > 0 {
+        println!("   [!] CRITICAL {}", critical_findings);
     }
-    if aggressive {
-        println!("    [-] Aggressive testing: fuzz_results.txt");
+    if high_findings > 0 {
+        println!("   [!!] HIGH {}", high_findings);
     }
-    if scan_vulns {
-        println!("    [-] Vulnerability scan: analysis_summary.txt");
+    if medium_findings > 0 {
+        println!("   [i] MEDIUM {}", medium_findings);
     }
-    if jwt {
-        println!("    [-] JWT analysis: jwt_analysis.txt");
+    
+    if critical_findings == 0 && high_findings == 0 && medium_findings == 0 {
+        println!("   [OK] No critical/high/medium vulnerabilities detected");
     }
-    if subdomains {
-        println!("    [-] Subdomain enumeration: subdomains.txt");
+    
+    println!("\n[=] Results saved to: {}", out_dir.display());
+    
+    // Save structured report if requested
+    if let Some(report_path) = report {
+        use api_hunter::output::clean_reporter::{ScanReport, Finding, Severity, JsAnalysisSummary};
+        use std::path::Path;
+        
+        let mut scan_report = ScanReport::new(domain.clone());
+        scan_report.scan_duration_seconds = scan_duration;
+        scan_report.total_endpoints = success_count;
+        
+        // Try to read and parse existing findings
+        if let Ok(summary_content) = std::fs::read_to_string(out_dir.join("analysis_summary.txt")) {
+            // Parse findings from summary (simplified - in production would parse properly)
+            for _ in 0..critical_findings {
+                scan_report.add_finding(Finding {
+                    severity: Severity::Critical,
+                    category: "Security".to_string(),
+                    title: "Critical Issue".to_string(),
+                    description: "See analysis_summary.txt for details".to_string(),
+                    url: target.clone(),
+                    evidence: vec![],
+                    remediation: None,
+                });
+            }
+        }
+        
+        // Save report
+        if let Err(e) = scan_report.save_to_file(Path::new(&report_path)) {
+            eprintln!("   [!] Failed to save report: {}", e);
+        } else {
+            println!("   [-] Report saved to: {}", report_path);
+        }
     }
-    println!("{}\n", "=".repeat(60));
+    
+    println!();
     
     Ok(())
 }
@@ -922,6 +908,52 @@ async fn run_deep_analysis(
     std::fs::write(&analysis_path, serde_json::to_string_pretty(&json_data)?)?;
     write_analysis_summary(&summary_path, &all_analyses, &admin_findings, &idor_findings)?;
     tracing::info!("Wrote partial results to: {}", analysis_path.display());
+    
+    // Phase 1.5: Automatic XSS testing for endpoints with potential XSS
+    tracing::info!("Phase 1.5: Checking for XSS vulnerabilities requiring deep testing...");
+    let mut xss_test_count = 0;
+    let mut xss_findings = Vec::new();
+    
+    for analysis in &all_analyses {
+        // Check if this endpoint has XSS-related findings
+        let has_xss_indicator = analysis.findings.iter().any(|f| 
+            f.contains("Missing CSP - vulnerable to XSS") ||
+            f.contains("XSS") ||
+            f.contains("reflected")
+        );
+        
+        if has_xss_indicator && xss_test_count < 10 {
+            tracing::info!("🔬 Running advanced XSS tests on: {}", analysis.url);
+            println!("   🔬 Auto-testing XSS on: {}", analysis.url);
+            
+            match api_hunter::analyze::vulnerability_scanner::VulnerabilityScanner::test_xss_advanced(client, &analysis.url).await {
+                Ok(findings) => {
+                    if !findings.is_empty() {
+                        tracing::info!("✓ Found {} XSS vulnerabilities on {}", findings.len(), analysis.url);
+                        println!("      [v] Found {} exploitable XSS vectors", findings.len());
+                        xss_findings.extend(findings);
+                    } else {
+                        tracing::info!("✓ No exploitable XSS found on {}", analysis.url);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("XSS test failed for {}: {}", analysis.url, e);
+                }
+            }
+            
+            xss_test_count += 1;
+            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        }
+    }
+    
+    if !xss_findings.is_empty() {
+        tracing::info!("Automatic XSS testing complete: {} vulnerabilities confirmed", xss_findings.len());
+        // Save XSS findings to separate file
+        let xss_path = out_dir.join("xss_findings.json");
+        std::fs::write(&xss_path, serde_json::to_string_pretty(&xss_findings)?)?;
+        println!("   [=] XSS findings saved to: {}", xss_path.display());
+    }
+
     
     // Phase 2: Admin endpoint scanning (if enabled)
     if scan_admin {

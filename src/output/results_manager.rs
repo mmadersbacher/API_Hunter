@@ -7,27 +7,18 @@ pub fn cleanup_results(results_dir: &str) -> Result<()> {
     let path = Path::new(results_dir);
     
     if path.exists() {
-        println!("[*] Cleaning previous scan results...");
-        
-        // Remove all files in results directory
+        // Silently remove all files in results directory
         if let Ok(entries) = fs::read_dir(path) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_file() {
-                    if let Err(e) = fs::remove_file(&path) {
-                        eprintln!("[!] Failed to remove {}: {}", path.display(), e);
-                    } else {
-                        println!("[-] Removed: {}", path.file_name().unwrap_or_default().to_string_lossy());
-                    }
+                    let _ = fs::remove_file(&path);
                 }
             }
         }
-        
-        println!("[+] Results directory cleaned");
     } else {
         // Create results directory if it doesn't exist
         fs::create_dir_all(path)?;
-        println!("[+] Created results directory: {}", results_dir);
     }
     
     Ok(())

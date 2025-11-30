@@ -78,6 +78,10 @@ pub enum Commands {
         #[arg(long, default_value_t = false)]
         jwt: bool,
 
+        /// Deep JavaScript analysis: Extract API endpoints, tokens, secrets, parameters from all JS files
+        #[arg(long, default_value_t = false)]
+        deep_js: bool,
+
         /// Timing template: T0 (paranoid) to T5 (insane) - like nmap -T4
         #[arg(short = 'T', long, value_parser = clap::value_parser!(u8).range(0..=5), default_value_t = 3)]
         timing: u8,
@@ -101,6 +105,10 @@ pub enum Commands {
         /// Resume from existing JSONL
         #[arg(long)]
         resume: Option<String>,
+
+        /// Save detailed report to file (JSON or TXT format)
+        #[arg(long, value_name = "FILE")]
+        report: Option<String>,
     },
 
     /// Ultra-deep endpoint testing with all security checks
