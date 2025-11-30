@@ -181,6 +181,11 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
         let _ = std::fs::write(&subdomain_path, &report);
         
         // Add API-related subdomains to scan targets
+        let api_subdomains_count = subdomain_results.iter().filter(|r| {
+            r.subdomain.contains("api") || r.subdomain.contains("rest") || 
+            r.subdomain.contains("graphql") || r.subdomain.contains("gateway")
+        }).count();
+        
         for result in subdomain_results.iter() {
             if result.subdomain.contains("api") 
                 || result.subdomain.contains("rest") 
@@ -190,7 +195,11 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
             }
         }
         
-        println!("   Found: {} subdomains ({} API-related)", subdomain_results.len(), all_targets.len() - 1);
+        if subdomain_results.len() > 0 {
+            println!("   [+] {} subdomains ({} API-related)", subdomain_results.len(), api_subdomains_count);
+        } else {
+            println!("   [-] No subdomains found");
+        }
     }
 
     // Discover and gather candidates
@@ -236,7 +245,7 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
 
     // Deep JavaScript Analysis - Extract ALL critical information
     if deep_js {
-        println!("   [DIR] Deep JS analysis...");
+        println!("   [*] Deep JS analysis...");
         
         match tokio::time::timeout(
             Duration::from_secs(60),
@@ -250,13 +259,20 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
             }
         ).await {
             Ok(Ok(js_critical)) => {
-                let secrets_warn = if js_critical.secrets.len() > 0 { " ⚠️" } else { "" };
-                println!("      Endpoints: {} | Secrets: {}{} | Parameters: {}", 
-                    js_critical.endpoints.len(),
-                    js_critical.secrets.len(),
-                    secrets_warn,
-                    js_critical.parameters.len()
-                );
+                let total_findings = js_critical.endpoints.len() + js_critical.secrets.len() + js_critical.parameters.len();
+                
+                if total_findings > 0 {
+                    print!("      [+] {} endpoints", js_critical.endpoints.len());
+                    if js_critical.secrets.len() > 0 {
+                        print!(" | {} secrets [!]", js_critical.secrets.len());
+                    }
+                    if js_critical.parameters.len() > 0 {
+                        print!(" | {} parameters", js_critical.parameters.len());
+                    }
+                    println!();
+                } else {
+                    println!("      [-] No critical information found");
+                }
                 
                 // Add discovered endpoints to candidates
                 for endpoint in &js_critical.endpoints {
@@ -274,16 +290,13 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
                 // Save critical findings to a special output file
                 let js_critical_path = format!("{}/js_critical_info.json", out);
                 let _ = std::fs::write(&js_critical_path, serde_json::to_string_pretty(&js_critical).unwrap_or_default());
-                
-                // Only print warning for HIGH VALUE findings
-                if !js_critical.secrets.is_empty() {
-                    println!("      [!] {} secrets found! Check {}", js_critical.secrets.len(), js_critical_path);
-                }
             }
             Ok(Err(e)) => {
+                println!("      [!] Failed: {}", e);
                 tracing::warn!("Deep JS analysis failed: {}", e);
             }
             Err(_) => {
+                println!("      [!] Timeout after 60s");
                 tracing::warn!("Deep JS analysis timed out");
             }
         }
@@ -291,7 +304,7 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
 
     // Browser-based dynamic API discovery
     if browser {
-        println!("   [WWW] Browser discovery...");
+        println!("   [*] Browser discovery...");
         
         match tokio::time::timeout(
             Duration::from_secs(browser_wait / 1000 + 30),
@@ -305,12 +318,18 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
             Ok(Ok(browser_apis)) => {
                 let count = browser_apis.len();
                 candidates.extend(browser_apis);
-                println!("      Found: {} endpoints", count);
+                if count > 0 {
+                    println!("      [+] {} endpoints", count);
+                } else {
+                    println!("      [-] No endpoints found");
+                }
             }
             Ok(Err(e)) => {
+                println!("      [!] Failed: {}", e);
                 tracing::warn!("Browser discovery failed: {}", e);
             }
             Err(_) => {
+                println!("      [!] Timeout");
                 tracing::warn!("Browser discovery timed out");
             }
         }
@@ -338,10 +357,15 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
     
     let filtered: Vec<String> = candidates.into_iter().filter(|u| api_hunter::filter::api_patterns::is_api_candidate(u)).collect();
     let filtered_count = filtered.len();
-    println!("   Found: {} URLs → {} API candidates", total_discovered, filtered_count);
+    
+    if filtered_count > 0 {
+        println!("   [+] {} candidates filtered from {} URLs", filtered_count, total_discovered);
+    } else {
+        println!("   [-] No API candidates found");
+    }
 
     // Phase 3: Active Probing
-    println!("[>] Probing endpoints...");
+    println!("[>] Probing {} endpoints...", filtered_count);
     
     // Create HTTP client based on anonymous mode
     let client = if let Some(ref anon) = anonymizer {
@@ -630,27 +654,29 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
     println!("\n{}", "=".repeat(60));
     println!("              SCAN COMPLETE");
     println!("{}", "=".repeat(60));
-    println!("\n[*] Summary:");
-    println!("   Target: {}", domain);
-    println!("   Duration: {}s", scan_duration);
-    println!("   Endpoints: {}", success_count);
+    println!("\n[*] Target: {}", domain);
+    println!("[*] Duration: {}s", scan_duration);
+    println!("[*] Endpoints Discovered: {}", success_count);
     
-    println!("\n[*] Security Findings:");
-    if critical_findings > 0 {
-        println!("   [!] CRITICAL {}", critical_findings);
-    }
-    if high_findings > 0 {
-        println!("   [!!] HIGH {}", high_findings);
-    }
-    if medium_findings > 0 {
-        println!("   [i] MEDIUM {}", medium_findings);
+    if critical_findings > 0 || high_findings > 0 || medium_findings > 0 {
+        println!("\n[*] Security Findings:");
+        if critical_findings > 0 {
+            println!("   [!!] CRITICAL: {}", critical_findings);
+        }
+        if high_findings > 0 {
+            println!("   [!] HIGH: {}", high_findings);
+        }
+        if medium_findings > 0 {
+            println!("   [i] MEDIUM: {}", medium_findings);
+        }
+    } else {
+        println!("\n[v] No critical/high/medium vulnerabilities detected");
     }
     
-    if critical_findings == 0 && high_findings == 0 && medium_findings == 0 {
-        println!("   [OK] No critical/high/medium vulnerabilities detected");
+    // Only show output location if user explicitly specified -o flag
+    if out != "./results" {
+        println!("\n[=] Results: {}", out_dir.display());
     }
-    
-    println!("\n[=] Results saved to: {}", out_dir.display());
     
     // Save structured report if requested
     if let Some(report_path) = report {
@@ -681,11 +707,9 @@ async fn run_scan(target: String, out: String, concurrency: u16, per_host: u16, 
         if let Err(e) = scan_report.save_to_file(Path::new(&report_path)) {
             eprintln!("   [!] Failed to save report: {}", e);
         } else {
-            println!("   [-] Report saved to: {}", report_path);
+            println!("[=] Report: {}", report_path);
         }
     }
-    
-    println!();
     
     Ok(())
 }
@@ -1128,10 +1152,10 @@ async fn run_deep_analysis(
     // Write summary
     let (critical, high, medium) = write_analysis_summary(&summary_path, &all_analyses, &admin_findings, &idor_findings)?;
     
-    println!("\n=== Deep Analysis Complete ===");
-    println!("🔴 Critical: {} | 🟠 High: {} | 🟡 Medium: {}", critical, high, medium);
-    println!("Results: {}", analysis_path.display());
-    println!("Summary: {}", summary_path.display());
+    // Only show if findings exist
+    if critical > 0 || high > 0 || medium > 0 {
+        println!("\n[*] Analysis: {} CRITICAL | {} HIGH | {} MEDIUM", critical, high, medium);
+    }
     
     Ok(())
 }
